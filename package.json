@@ -1,0 +1,36 @@
+{
+  "name": "asaf-framework",
+  "version": "0.1.0",
+  "description": "AI Software Architect Framework (ASAF) - Un estándar para desarrollo asistido por IA",
+  "main": "dist/core/index.js",
+  "bin": {
+    "asaf": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli/index.js",
+    "dev": "ts-node cli/index.ts",
+    "test": "jest",
+    "prepare": "tsc"
+  },
+  "keywords": [
+    "ai",
+    "software-architecture",
+    "copilot",
+    "agent",
+    "adr",
+    "context-minimization"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
