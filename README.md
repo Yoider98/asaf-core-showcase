@@ -1,24 +1,25 @@
-# AI Software Architect Framework (ASAF) 🤖📐
+# AI Software Architect & Engineering Intelligence Platform (ASAF) 🤖📐
 
-**ASAF** es un estándar y framework independiente del modelo de IA que ayuda a diseñar, crear, mantener y evolucionar proyectos de software mediante arquitectos virtuales, gobernanza de código estática y un motor de contexto inteligente basado en Grafos Semánticos. 
+**ASAF** es un estándar y plataforma de inteligencia de ingeniería independiente del modelo de IA que ayuda a diseñar, crear, mantener y evolucionar proyectos de software mediante la orquestación de agentes virtuales, gobernanza de código dinámica configurable y un motor de contexto inteligente basado en Grafos Semánticos y compiladores de AST.
 
-Su propósito principal es guiar a desarrolladores e Inteligencias Artificiales en la toma de decisiones arquitectónicas y la automatización de la infraestructura, minimizando el consumo de tokens mediante slicing sintáctico y previniendo la degradación del código mediante auditorías automatizadas.
+Su propósito principal es actuar como la **capa de inteligencia, contexto, memoria y gobernanza** que coordina a los agentes de desarrollo (a través de MCP, SDK o CLI), minimizando el consumo de tokens mediante slicing sintáctico y previniendo la degradación del código mediante auditorías y linters automatizados.
 
 > [!IMPORTANT]
-> **Estado del Proyecto:** `Alfa Cerrada / Developer Preview`. 
-> El analizador AST semántico y el linter de gobernanza están optimizados para el ecosistema **TypeScript, JavaScript y Python** en esta iteración.
+> **Estado del Proyecto:** `Developer Preview / Alpha`.
+> El motor cuenta con un parser AST modular extensible (`LanguageAdapter`) optimizado inicialmente para **TypeScript, JavaScript y Python** en esta iteración.
 
 ---
 
 ## 🎯 Objetivos y Características Core
 
-* **Inicialización Automatizada (Zero-Config):** Configura, analiza, indexa, audita brechas y genera reglas de asistentes en un solo paso usando `asaf init`.
-* **Reducción de Tokens mediante Slicing e Indexación Incremental (TokenSaver):** Utiliza hashing SHA-256 para evitar re-procesar código sin cambios y calcula el impacto en cascada utilizando dependencias de importación directas e indirectas.
-* **Catálogo de Especificaciones Autogenerado:** Mapea cada módulo a especificaciones funcionales y análisis estático de seguridad continuo (`docs/specs/*.spec.md`) con un índice global (`docs/specs/README.md`).
-* **Auditoría de Brechas e Informe Ejecutivo:** Identifica vulnerabilidades de seguridad (ej. inyecciones SQL, credenciales expuestas), ineficiencias de rendimiento DB (ej. N+1 y `SELECT *`) y SEO web, consolidando un reporte ejecutivo en `docs/audit-report.md`.
-* **Soporte Multi-Lenguaje:** Mapeo sintáctico nativo de dependencias y extracción de firmas para el ecosistema de TypeScript, JavaScript y Python.
-* **Architecture Governance (Linter de Capas):** Valida de forma estática que las dependencias de importación cumplan estrictamente con las capas de *Clean Architecture* o *DDD*.
-* **Puente de Agentes Universal (IDE Rules):** Auto-genera directivas de contexto (`.cursorrules`, `.clinerules`) que le enseñan a cualquier IA cómo interactuar con el proyecto y respetar las decisiones aprobadas.
+* **Inicialización Interactiva con Diagnóstico:** Configura, analiza e indexa tu proyecto detectando y aconsejando la mejor arquitectura (Clean, DDD o Capas) según la estructura física de tus carpetas mediante `asaf init`.
+* **Language Adapters (AST Modulado):** El motor de descubrimiento (`DiscoveryEngine`) analiza de forma agnóstica el árbol de sintaxis abstracta (AST) de múltiples lenguajes mediante adaptadores modulares.
+* **Architecture Governance Dinámico (Linter de Capas):** Linter de arquitectura configurable a través de `asaf.json` que valida dependencias de importación en Clean Architecture o DDD, vinculándose directamente a Decisiones de Arquitectura (ADRs).
+* **Task & Impact Intelligence:** Evalúa tareas en lenguaje natural (`asaf task`) mapeando archivos impactados, dependencias en cascada y estimando el riesgo y presupuesto de tokens (`Context Budget`).
+* **Quality & Security SAST Integrations:** Orquesta herramientas de análisis estático externas de seguridad y linter líderes (como `ESLint` para JS/TS y `Bandit` para Python), consolidando los hallazgos en un reporte ejecutivo.
+* **CLI Project Status & Technical Debt Dashboard:** Mapea la salud de tu repositorio en un Dashboard de consola visual (`asaf status`) con barras de progreso coloreadas y estimación de horas de Deuda Técnica.
+* **Agent Runtime & Multi-agent Orchestration:** Secuencia interactiva de agentes virtuales (Solution Architect, Backend, DBA, QA) con verificación post-ejecución para evitar regresiones de calidad en cada tarea (`asaf run`).
+* **Universal Agent Bridge (MCP Server):** Servidor native MCP (Model Context Protocol) sobre stdio para inyectar contexto y gobernanza directamente en asistentes de IA líderes como Cursor, Cline o Claude Code.
 
 ---
 
@@ -27,14 +28,16 @@ Su propósito principal es guiar a desarrolladores e Inteligencias Artificiales 
 ```
 ASAF/
 ├── advisor/         # Motor de recomendaciones enriquecidas (ADRs, riesgos, evolución).
-├── agents/          # Pool de agentes de IA especializados con checklists (BA, Arch, Dev, QA, Security, DevOps).
-├── blueprints/      # Plantillas de arquitectura de referencia (ej. NestJS Clean Architecture).
+├── agents/          # Pool de agentes y Agent Orchestrator (Solution Architect, Backend, QA, etc.).
+├── blueprints/      # Plantillas de arquitectura de referencia (Clean Architecture, DDD).
 ├── cli/             # Interfaz de línea de comandos (CLI) principal de ASAF.
 ├── context/         # Motor de slicing sintáctico y vinculación de ADRs en prompts.
-├── core/            # Núcleo de gobernanza, linter de capas, especificaciones (specs), tokenSaver y auditoría.
-├── discovery/       # Analizador AST nativo (TS compiler) y regex para Python, grafos semánticos y de conocimiento.
-├── docs/            # Documentación y especificación de exposición (MCP, REST, SDKs).
-└── generators/      # Generadores de infraestructura (Docker, Terraform, CI/CD).
+├── core/            # Núcleo de gobernanza, linter dinámico, specs, status y auditoría SAST.
+├── discovery/       # Analizador AST con adaptadores modulares y grafos semánticos.
+├── docs/            # Documentación de interfaces de comunicación y especificaciones de APIs.
+├── generators/      # Generadores de infraestructura (Docker, Terraform, CI/CD).
+├── mcp/             # Servidor Model Context Protocol (MCP) y herramientas de exposición.
+└── templates/       # Plantillas internas.
 ```
 
 ---
@@ -42,65 +45,57 @@ ASAF/
 ## 💻 Comandos del CLI
 
 ### 1. `asaf init`
-Inicializa y configura de forma completa y automática el framework. Realiza el análisis del grafo semántico, inicializa la caché incremental de tokens, genera las especificaciones funcionales e índice de cada módulo, ejecuta la auditoría de brechas en el código existente y genera las directivas `.cursorrules` / `.clinerules`.
+Inicializa el framework. Realiza preguntas de negocio e interactúa para aconsejar y configurar las políticas de arquitectura y capas en `asaf.json`.
 ```bash
 npx asaf init
 ```
 
-### 2. `asaf audit`
-Ejecuta la auditoría avanzada de seguridad (inyecciones SQL, secrets), optimizaciones de base de datos (problema N+1, SELECT *), SEO y escalabilidad, actualizando el informe de brechas en `docs/audit-report.md`.
+### 2. `asaf status`
+Muestra el Dashboard de salud consolidado de forma visual con barras de progreso, estimación de Deuda Técnica (horas de corrección) y findings abiertos.
+```bash
+npx asaf status
+```
+
+### 3. `asaf task "<desc>"`
+Analiza una tarea de desarrollo prediciendo el impacto, dependencias afectadas, ADRs relacionados y entregando un plan paso a paso.
+```bash
+npx asaf task "Implementar autenticación JWT en controladores de usuarios"
+```
+
+### 4. `asaf run "<desc>"`
+Inicia la orquestación interactiva del Agent Runtime, secuenciando los turnos de los agentes requeridos con flujos de aprobación y validación final de deuda técnica.
+```bash
+npx asaf run "Refactorizar y probar el linter de governance"
+```
+
+### 5. `asaf mcp`
+Inicia el servidor Model Context Protocol (MCP) de ASAF sobre transporte `stdio` para integrarse con asistentes IA externos.
+```bash
+npx asaf mcp
+```
+
+### 6. `asaf audit`
+Ejecuta la auditoría general, orquestando herramientas SAST locales (ESLint y Bandit) y generando un informe en `docs/audit-report.md`.
 ```bash
 npx asaf audit
 ```
 
-### 3. `asaf specs`
-Genera o actualiza individualmente o de forma masiva las especificaciones funcionales e índice maestro.
-```bash
-npx asaf specs --all
-```
-
-### 4. `asaf check`
-Audita el linter de gobernanza de capas arquitectónicas. Si detecta violaciones (ej. el Dominio importando infraestructura), imprime los errores y sale con código `exit 1` (ideal para pipelines de CI/CD).
+### 7. `asaf check`
+Audita el linter de capas arquitectónicas leyendo las reglas de `asaf.json`. Retorna código `exit 1` en caso de fallos (ideal para CI/CD).
 ```bash
 npx asaf check
 ```
 
-### 5. `asaf context`
-Muestra el impacto de los cambios de Git.
-* Usa el flag `--prompt` para exportar un prompt en Markdown listo para copiar/pegar en tu IA, conteniendo las decisiones de arquitectura (ADRs) a respetar y el código fuente con slicing estructural.
-```bash
-npx asaf context --prompt
-```
-
-### 6. `asaf rules`
-Genera directivas y reglas automatizadas para que tu asistente de IA (Cursor o Cline) siga los lineamientos de ASAF.
-```bash
-npx asaf rules --type all
-```
-
-### 7. `asaf advise`
-Genera recomendaciones de arquitectura basadas en las variables de negocio de la entrevista y el stack real detectado en el código.
-```bash
-npx asaf advise --apply
-```
-
 ---
 
-## 📖 Guía de Uso Avanzado: Adopción y Flujo Continuo
+## 📖 Guía de Adopción e Integración de Agentes (Cursor / Cline / Claude Code)
 
-### Scenario A: Refactorizar y sanear un proyecto existente
-1. Ejecuta el comando unificado:
-   ```bash
-   npx asaf init
-   ```
-2. Revisa el informe ejecutivo de brechas generado en [audit-report.md](file:///docs/audit-report.md) y el índice en [README.md](file:///docs/specs/README.md).
-3. Delega a tu asistente de IA de forma segura la corrección de brechas respetando las reglas de post-ejecución (recalcular hashes y actualizar especificaciones en cada cambio).
-
----
-
-## 📄 Licencia
-
-Este proyecto está bajo la Licencia **MIT**.I/CD para bloquear los pull requests de forma automatizada cuando la arquitectura se vea degradada.
+1. **Inicializar y Configurar:**
+   Corre `npx asaf init` y configura tu arquitectura en `asaf.json`.
+2. **Levantar el Servidor MCP:**
+   Registra el comando `node <path-to-asaf>/dist/cli/index.js mcp` en tu configuración de MCP de Cursor o Cline.
+3. **Consumir Herramientas:**
+   Los asistentes llamarán de forma automática a `asaf_get_semantic_context`, `asaf_check_governance` y `asaf_analyze_task` para auto-limitarse al contexto mínimo de tokens y asegurar la calidad estructural del proyecto.
 
 ---
 

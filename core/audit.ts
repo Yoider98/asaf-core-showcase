@@ -1,15 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 import chalk from 'chalk';
-import { SpecsEngine } from './specs';
 
 export interface AuditBreach {
-  type: 'seguridad' | 'base_de_datos' | 'seo_web' | 'escalabilidad';
+  type: 'seguridad' | 'base_de_datos' | 'seo_web' | 'escalabilidad' | 'calidad_sast';
   severity: 'crítica' | 'alta' | 'media' | 'baja';
   file: string;
   evidence: string;
   description: string;
   recommendation: string;
+  line?: number;
 }
 
 export class AuditEngine {
@@ -31,8 +32,86 @@ export class AuditEngine {
       }
     });
 
+    // 2. Orquestar herramientas SAST externas
+    this.runESLintSAST();
+    this.runBanditSAST();
+
     this.generateReport();
     return this.breaches;
+  }
+
+  /**
+   * Intenta ejecutar ESLint localmente para capturar problemas de seguridad y calidad
+   */
+  private runESLintSAST(): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+      this.parseESLintOutput(output);
+    } catch (error: any)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  } else {
+        console.log(chalk.gray('ℹ ESLint no configurado o no disponible en el proyecto local. Se omite.'));
+      }
+    }
+  }
+
+  private parseESLintOutput(jsonStr: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }: ${msg.message}`,
+            description: `Violación SAST [${msg.ruleId || 'desconocido'}]: ${msg.message}`,
+            recommendation: `Resolver advertencia reportada por ESLint.`,
+            line: msg.line
+          });
+        });
+      });
+    } catch (e)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+  }
+
+  /**
+   * Intenta ejecutar Bandit localmente para capturar problemas de seguridad en Python
+   */
+  private runBanditSAST(): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+      this.parseBanditOutput(output);
+    } catch (error: any)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  } else {
+        console.log(chalk.gray('ℹ Bandit no disponible en el PATH del sistema o proyecto. Se omite.'));
+      }
+    }
+  }
+
+  private parseBanditOutput(jsonStr: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }: ${finding.code.trim()}`,
+            description: `[Bandit SAST] ${finding.issue_text}`,
+            recommendation: `Revisar recomendación Bandit: ${finding.more_info}`,
+            line: finding.line_number
+          });
+        });
+      }
+    } catch (e)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
   }
 
   private auditSecurity(file: string, content: string): void  {
@@ -73,7 +152,6 @@ export class AuditEngine {
   });
     }
 
-    // Identificar posibles bucles N+1 (consultas DB dentro de bucle map, forEach, for)
     if (content.match(/(forEach|map|for\s*\().*(\.query|\.find|\.findOne|db\.)/s)) {
       this.breaches.push({
         type: 'base_de_datos',
@@ -143,14 +221,20 @@ export class AuditEngine {
     markdown += `- **Brechas Totales Detectadas:** ${totalBreaches}\n`;
     markdown += `- **Nivel de Seguridad:** ${this.getBreachSummaryCount('seguridad')} críticas/altas encontradas.\n`;
     markdown += `- **Nivel de Rendimiento DB:** ${this.getBreachSummaryCount('base_de_datos')} optimizaciones sugeridas.\n`;
-    markdown += `- **Calidad SEO:** ${this.getBreachSummaryCount('seo_web')} fallos identificados.\n\n`;
+    markdown += `- **Calidad SEO:** ${this.getBreachSummaryCount('seo_web')} fallos identificados.\n`;
+    markdown += `- **Calidad SAST (Estático):** $ {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  } advertencias del linter.\n\n`;
 
     markdown += `| Gravedad | Componente | Tipo | Evidencia | Recomendación |\n`;
     markdown += `| --- | --- | --- | --- | --- |\n`;
 
     this.breaches.forEach(b => {
       const severityEmoji = b.severity === 'crítica' ? '🚨' : b.severity === 'alta' ? '🟠' : b.severity === 'media' ? '🟡' : '🟢';
-      markdown += `| ${severityEmoji} **${b.severity.toUpperCase()}** | [${path.basename(b.file)}](file:///${path.join(this.projectPath, b.file).replace(/\\/g, '/')}) | ${b.type.toUpperCase()} | \`${b.evidence}\` | ${b.recommendation} |\n`;
+      const lineStr = b.line ? ` (Línea ${b.line})` : '';
+      markdown += `| ${severityEmoji} **${b.severity.toUpperCase()}** | [${path.basename(b.file)}${lineStr}](file:///${path.join(this.projectPath, b.file).replace(/\\/g, '/')}) | ${b.type.toUpperCase()} | \`${b.evidence}\` | ${b.recommendation} |\n`;
     });
 
     fs.writeFileSync(reportPath, markdown, 'utf-8');

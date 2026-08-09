@@ -21,7 +21,8 @@
     "blueprints/**/*",
     "generators/**/*",
     "integrations/**/*",
-    "knowledge/**/*"
+    "knowledge/**/*",
+    "mcp/**/*"
   ],
   "exclude": [
     "node_modules",
