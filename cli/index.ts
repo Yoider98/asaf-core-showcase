@@ -14,28 +14,108 @@ program
 // Comando: init
 program
   .command('init')
-  .description('Inicializa la configuración de ASAF en el repositorio actual')
-  .action(() => {
-    console.log(chalk.blue('Inicializando ASAF...'));
-    const configPath = path.join(process.cwd(), 'asaf.json');
-    if (fs.existsSync(configPath)) {
-      console.log(chalk.yellow('El archivo asaf.json ya existe.'));
-      return;
+  .description('Inicializa la configuración de ASAF en el repositorio actual, realiza la auditoría y configura las reglas automáticamente')
+  .action(async () => {
+    console.log(chalk.blue('Inicializando ASAF de forma automática...'));
+    const projectDir = process.cwd();
+    const configPath = path.join(projectDir, 'asaf.json');
+    
+    // 1. Crear asaf.json si no existe
+    if (!fs.existsSync(configPath)) {
+      const defaultConfig = {
+        name: path.basename(projectDir),
+        version: '0.1.0',
+        description: 'Proyecto administrado por ASAF',
+        discovery: {
+          exclude: ['node_modules', 'dist', '.git']
+        },
+        architecture: {},
+        decisions: {
+          adrDir: 'docs/adr'
+        }
+      };
+      fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+      console.log(chalk.green('✓ Archivo asaf.json creado con éxito.'));
+    } else {
+      console.log(chalk.yellow('El archivo asaf.json ya existe. Continuando con la configuración de características...'));
     }
-    const defaultConfig = {
-      name: path.basename(process.cwd()),
-      version: '0.1.0',
-      description: 'Proyecto administrado por ASAF',
-      discovery: {
-        exclude: ['node_modules', 'dist', '.git']
-      },
-      architecture: {},
-      decisions: {
-        adrDir: 'docs/adr'
+
+    try {
+      // 2. Ejecutar análisis del grafo de dependencias
+      console.log(chalk.yellow('Analizando dependencias del proyecto...'));
+      const { DiscoveryEngine } = require('../discovery/index');
+      
+      let exclude = ['node_modules', 'dist', '.git'];
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (config.discovery && config.discovery.exclude) {
+        exclude = config.discovery.exclude;
       }
-    };
-    fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
-    console.log(chalk.green('Archivo asaf.json creado con éxito.'));
+
+      const discoveryEngine = new DiscoveryEngine(projectDir, exclude);
+      const graph = discoveryEngine.analyze();
+      
+      const graphPath = path.join(projectDir, 'asaf-graph.json');
+      fs.writeFileSync(graphPath, JSON.stringify(graph, null, 2), 'utf-8');
+
+      // Generar grafo semántico
+      const { SemanticAnalyzer } = require('../discovery/semantic');
+      const semanticAnalyzer = new SemanticAnalyzer(graph);
+      const semanticGraph = semanticAnalyzer.analyzeRelations();
+      fs.writeFileSync(path.join(projectDir, 'asaf-semantic-graph.json'), JSON.stringify(semanticGraph, null, 2), 'utf-8');
+
+      // Generar Knowledge Graph (Memoria de Proyecto)
+      const { KnowledgeGraphBuilder } = require('../discovery/knowledge');
+      const knowledgeBuilder = new KnowledgeGraphBuilder(projectDir, graph, semanticGraph);
+      const knowledgeGraph = knowledgeBuilder.build();
+      fs.writeFileSync(path.join(projectDir, 'asaf-knowledge-graph.json'), JSON.stringify(knowledgeGraph, null, 2), 'utf-8');
+
+      console.log(chalk.green('✓ Grafo de dependencias y memoria semántica construidos.'));
+
+      // 3. Generar especificaciones (Specs) e inicializar hashes incrementales
+      console.log(chalk.yellow('Indexando módulos y configurando caché de tokens...'));
+      const { SpecsEngine } = require('../core/specs');
+      const { TokenSaverEngine } = require('../core/tokenSaver');
+      
+      const specsEngine = new SpecsEngine(projectDir);
+      const tokenSaver = new TokenSaverEngine(projectDir);
+
+      const files = Object.keys(graph.nodes);
+      files.forEach((file: string) => {
+        const fullFilePath = path.join(projectDir, file);
+        if (fs.existsSync(fullFilePath)) {
+          const content = fs.readFileSync(fullFilePath, 'utf-8');
+          // Forzar primer análisis e indexación
+          tokenSaver.checkNeedsAnalysis(file, content);
+          specsEngine.analyzeAndGenerateSpec(file);
+        }
+      });
+
+      tokenSaver.pruneMissingFiles(files);
+      tokenSaver.saveHashes();
+      specsEngine.updateSpecsIndex();
+
+      console.log(chalk.green('✓ Especificaciones de módulos y catálogo indexados con éxito.'));
+
+      // 4. Ejecutar Auditoría inicial de brechas
+      console.log(chalk.yellow('Ejecutando auditoría de seguridad, SEO y base de datos...'));
+      const { AuditEngine } = require('../core/audit');
+      const auditEngine = new AuditEngine(projectDir);
+      const breaches = auditEngine.runAudit(files);
+
+      console.log(chalk.green(`✓ Auditoría de adopción finalizada. Brechas encontradas: ${breaches.length}`));
+
+      // 5. Generar directivas para asistentes de IA (.cursorrules / .clinerules)
+      console.log(chalk.yellow('Configurando directivas para asistentes de desarrollo (.cursorrules, .clinerules)...'));
+      const { RulesGenerator } = require('./rules');
+      const rulesGenerator = new RulesGenerator(projectDir);
+      rulesGenerator.generate({ type: 'all' });
+
+      console.log(chalk.green.bold('\n✓ ¡ASAF se ha inicializado y configurado de forma completa y automática!'));
+      console.log(`Reporte ejecutivo de brechas disponible en: ${chalk.bold('docs/audit-report.md')}`);
+      console.log(`Catálogo maestro de especificaciones en: ${chalk.bold('docs/specs/README.md')}`);
+    } catch (error: any) {
+      console.error(chalk.red(`Error durante la inicialización automática de ASAF: ${error.message}`));
+    }
   });
 
 // Comando: analyze
@@ -310,6 +390,46 @@ program
     }
   });
 
+// Comando: specs
+program
+  .command('specs')
+  .description('Genera o actualiza las especificaciones (specs) y el índice maestro de módulos')
+  .option('-f, --file <path>', 'Ruta de un archivo/módulo específico a procesar')
+  .option('-a, --all', 'Analiza todo el proyecto y actualiza todos los specs')
+  .action((options) => {
+    try {
+      const { SpecsEngine } = require('../core/specs');
+      const engine = new SpecsEngine(process.cwd());
+
+      if (options.file) {
+        console.log(chalk.blue(`Procesando spec para el módulo: ${options.file}`));
+        engine.analyzeAndGenerateSpec(options.file);
+      } else if (options.all) {
+        console.log(chalk.blue('Procesando especificaciones para todo el proyecto...'));
+        
+        // Obtener archivos del grafo de dependencias local si existe
+        const graphPath = path.join(process.cwd(), 'asaf-graph.json');
+        if (fs.existsSync(graphPath)) {
+          const graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+          const files = Object.keys(graph.nodes);
+          files.forEach((file: string) => {
+            if (file.endsWith('.ts') || file.endsWith('.js')) {
+              engine.analyzeAndGenerateSpec(file);
+            }
+          });
+        } else {
+          console.log(chalk.yellow('asaf-graph.json no encontrado. Ejecuta primero "npm run dev -- analyze".'));
+        }
+      } else {
+        console.log(chalk.blue('Actualizando el índice maestro de especificaciones...'));
+        engine.updateSpecsIndex();
+      }
+      console.log(chalk.green('Operación de especificaciones completada.'));
+    } catch (e: any) {
+      console.error(chalk.red(`Error al procesar especificaciones: ${e.message}`));
+    }
+  });
+
 // Comando: check
 program
   .command('check')
@@ -379,6 +499,76 @@ program
       console.log(chalk.green('Configuraciones de despliegue generadas exitosamente.'));
     } catch (e: any) {
       console.error(chalk.red(`Error durante la generación de infraestructura: ${e.message}`));
+    }
+  });
+
+// Comando: audit
+program
+  .command('audit')
+  .description('Analiza todo el proyecto inicial, genera specs y produce un informe de brechas e ineficiencias')
+  .action(async () => {
+    const projectDir = process.cwd();
+    console.log(chalk.blue('Iniciando auditoría general de adopción ASAF...'));
+
+    try {
+      // 1. Ejecutar análisis del grafo de dependencias
+      console.log(chalk.yellow('Analizando dependencias y construyendo el grafo semántico...'));
+      const { DiscoveryEngine } = require('../discovery/index');
+      
+      let exclude = ['node_modules', 'dist', '.git'];
+      const configPath = path.join(projectDir, 'asaf.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (config.discovery && config.discovery.exclude) {
+          exclude = config.discovery.exclude;
+        }
+      }
+
+      const discoveryEngine = new DiscoveryEngine(projectDir, exclude);
+      const graph = discoveryEngine.analyze();
+      
+      const graphPath = path.join(projectDir, 'asaf-graph.json');
+      fs.writeFileSync(graphPath, JSON.stringify(graph, null, 2), 'utf-8');
+
+      // 2. Generar especificaciones (Specs) e Indexar incrementalmente
+      console.log(chalk.yellow('Generando especificaciones de módulos e inicializando caché de tokens...'));
+      const { SpecsEngine } = require('../core/specs');
+      const { TokenSaverEngine } = require('../core/tokenSaver');
+      
+      const specsEngine = new SpecsEngine(projectDir);
+      const tokenSaver = new TokenSaverEngine(projectDir);
+
+      const files = Object.keys(graph.nodes);
+      let analyzedCount = 0;
+
+      files.forEach((file: string) => {
+        const fullFilePath = path.join(projectDir, file);
+        if (fs.existsSync(fullFilePath)) {
+          const content = fs.readFileSync(fullFilePath, 'utf-8');
+          // Solo analiza y genera spec si el archivo ha cambiado (Ahorro de tokens)
+          if (tokenSaver.checkNeedsAnalysis(file, content)) {
+            specsEngine.analyzeAndGenerateSpec(file);
+            analyzedCount++;
+          }
+        }
+      });
+
+      tokenSaver.pruneMissingFiles(files);
+      tokenSaver.saveHashes();
+      specsEngine.updateSpecsIndex();
+
+      console.log(chalk.green(`Caché incremental actualizada. Módulos analizados: ${analyzedCount}/${files.length} (Tokens Ahorrados).`));
+
+      // 3. Ejecutar Auditoría de Brechas (Seguridad, DB, SEO, Escalabilidad)
+      console.log(chalk.yellow('Escaneando brechas de seguridad, optimización DB, SEO y escalabilidad...'));
+      const { AuditEngine } = require('../core/audit');
+      const auditEngine = new AuditEngine(projectDir);
+      const breaches = auditEngine.runAudit(files);
+
+      console.log(chalk.green.bold(`\n✓ ¡Auditoría completada! Se detectaron ${breaches.length} brechas de gobernanza.`));
+      console.log(`Informe ejecutivo disponible en: ${chalk.bold('docs/audit-report.md')}`);
+    } catch (error: any) {
+      console.error(chalk.red(`Error durante la auditoría del proyecto: ${error.message}`));
     }
   });
 

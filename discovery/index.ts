@@ -87,16 +87,28 @@ export class DiscoveryEngine {
         else if (ext === '.json') language = 'JSON';
         else if (ext === '.md') language = 'Markdown';
         else if (ext === '.yml' || ext === '.yaml') language = 'YAML';
+        else if (ext === '.py') language = 'Python';
 
         if (language) {
           languages.add(language);
         }
 
-        if (['.ts', '.js'].includes(ext)) {
+        if (['.ts', '.js', '.py'].includes(ext)) {
           const relativePath = path.relative(this.projectPath, fullPath).replace(/\\/g, '/');
           const content = fs.readFileSync(fullPath, 'utf-8');
           
-          const { imports, classes } = this.analyzeAST(fullPath, content);
+          let imports: string[] = [];
+          let classes: ClassMetadata[] = [];
+
+          if (ext === '.py') {
+            const parsed = this.analyzePythonCode(content);
+            imports = parsed.imports;
+            classes = parsed.classes;
+          } else {
+            const parsed = this.analyzeAST(fullPath, content);
+            imports = parsed.imports;
+            classes = parsed.classes;
+          }
 
           this.graph.nodes[relativePath] = {
             id: relativePath,
@@ -220,6 +232,62 @@ export class DiscoveryEngine {
     };
 
     visit(sourceFile);
+
+    return { imports, classes };
+  }
+
+  /**
+   * Analiza de forma básica archivos Python utilizando expresiones regulares para extraer dependencias e información semántica
+   */
+  private analyzePythonCode(content: string): { imports: string[]; classes: ClassMetadata[] } {
+    const imports: string[] = [];
+    const classes: ClassMetadata[] = [];
+
+    // 1. Extraer importaciones en Python: "import os", "from flask import Flask", "import numpy as np"
+    const importRegex = /^\s*(?:import\s+([\w\d_, ]+)|from\s+([\w\d_.]+)\s+import\s+([\w\d_, *()]+))/gm;
+    let match;
+    while ((match = importRegex.exec(content)) !== null) {
+      if (match[1]) {
+        // "import X, Y"
+        match[1].split(',').forEach(imp => imports.push(imp.trim()));
+      } else if (match[2]) {
+        // "from X import Y"
+        imports.push(match[2].trim());
+      }
+    }
+
+    // 2. Extraer clases e identificar métodos indentados en Python
+    const classLines = content.split('\n');
+    let currentClass: ClassMetadata | null = null;
+
+    classLines.forEach(line => {
+      // Detección de clases: "class User(BaseModel):" o "class Order:"
+      const classMatch = line.match(/^\s*class\s+([\w\d_]+)(?:\(([\w\d_, ]+)\))?\s*:/);
+      if (classMatch) {
+        if (currentClass) {
+          classes.push(currentClass);
+        }
+        currentClass = {
+          name: classMatch[1],
+          methods: [],
+          decorators: [],
+          injectedDependencies: [],
+          implementsInterfaces: classMatch[2] ? classMatch[2].split(',').map(i => i.trim()) : []
+        };
+      }
+
+      // Detección de métodos indentados dentro de la clase actual
+      if (currentClass) {
+        const methodMatch = line.match(/^\s+def\s+([\w\d_]+)\s*\(/);
+        if (methodMatch) {
+          currentClass.methods.push(methodMatch[1]);
+        }
+      }
+    });
+
+    if (currentClass) {
+      classes.push(currentClass);
+    }
 
     return { imports, classes };
   }
