@@ -571,36 +571,56 @@ program
 program
   .command('check')
   .description('Audita el cumplimiento de las capas arquitectónicas del proyecto (Linter de Gobernanza)')
-  .action(() => {
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (options) => {
     const projectDir = process.cwd();
-    const graphPath = path.join(projectDir, 'asaf-graph.json');
-
-    if (!fs.existsSync(graphPath)) {
-      console.log(chalk.red('El archivo asaf-graph.json no existe. Ejecuta "asaf analyze" primero.'));
-      return;
-    }
-
     try {
-      console.log(chalk.blue('Iniciando auditoría de gobernanza arquitectónica...'));
-      const graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
-      const { ArchitectureLinter } = require('../core/governance');
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { ArchitectureGovernanceEngine } = require('../core/infrastructure/governance/governance-engine');
 
-      const linter = new ArchitectureLinter(graph, projectDir);
-      const violations = linter.checkRules();
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
 
-      if (violations.length === 0) {
-        console.log(chalk.green.bold('\n✓ ¡Felicidades! No se detectaron violaciones arquitectónicas. La estructura cumple las capas.'));
+      const govEngine = new ArchitectureGovernanceEngine(model, projectDir);
+      const report = govEngine.checkRules();
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
       } else {
-        console.log(chalk.red.bold(`\n✗ Se detectaron ${violations.length} violaciones arquitectónicas:\n`));
-        violations.forEach((v: any, idx: number) => {
-          console.log(`${chalk.red.bold(`[VIOLACIÓN #${idx + 1}]`)} ${chalk.yellow(v.file)}`);
-          console.log(`  -> Importación prohibida: ${chalk.bold(v.importedPath)}`);
-          console.log(`  -> Regla rota: ${v.rule}\n`);
-        });
-        process.exit(1); // Retornar código de salida con error para CI/CD
+        console.log(chalk.blue.bold('\nASAF Architecture Governance - Auditoría de Capas\n'));
+        console.log(`Reglas Evaluadas: ${chalk.cyan(report.totalRules)}`);
+        console.log(`Archivos Auditados: ${chalk.cyan(report.totalFiles)}`);
+        console.log(`Violaciones:      ${report.status === 'pass' ? chalk.green('0') : chalk.red(report.violations.length)}`);
+        console.log(`Errores:          ${chalk.red(report.errors)}`);
+        console.log(`Warnings:         ${chalk.yellow(report.warnings)}`);
+        console.log(chalk.gray('────────────────────────────────────────\n'));
+
+        if (report.violations.length > 0) {
+          report.violations.forEach((v: any, idx: number) => {
+            const label = v.severity === 'error' ? chalk.red.bold('ERROR') : chalk.yellow.bold('WARNING');
+            console.log(`${label} [${idx + 1}] en ${chalk.bold(v.file)}`);
+            console.log(`  Importación no permitida: ${chalk.yellow(v.importedPath)}`);
+            console.log(`  Regla de gobernanza:     ${v.rule}`);
+            if (v.adrLink) {
+              console.log(`  Decisión Vinculada:      ${chalk.cyan(v.adrLink)}`);
+            }
+            console.log();
+          });
+        } else {
+          console.log(chalk.green.bold('✓ ¡Auditoría exitosa! No se detectaron violaciones arquitectónicas en el proyecto.'));
+        }
+      }
+
+      if (report.errors > 0) {
+        process.exit(1);
       }
     } catch (e: any) {
-      console.error(chalk.red(`Error durante la auditoría: ${e.message}`));
+      console.error(chalk.red(`Error al ejecutar auditoría de gobernanza: ${e.message}`));
+      process.exit(1);
     }
   });
 
@@ -777,9 +797,33 @@ program
   .description('Muestra la salud del proyecto actual, riesgos y métricas de deuda técnica de forma visual')
   .action(async () => {
     const projectDir = process.cwd();
-    console.log(chalk.blue.bold('\n=== ASAF PROJECT STATUS & DIAGNOSTIC ===\n'));
 
     try {
+      // Cargar metadatos de Index y Git
+      let indexStatusText = chalk.gray('No indexado (Ejecute primero "asaf index")');
+      try {
+        const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+        const { GitChangeDetector } = require('../core/infrastructure/git/git-change-detector');
+        
+        const store = new FileProjectIndexStore(projectDir);
+        const model = await store.load();
+        if (model) {
+          const detector = new GitChangeDetector(projectDir);
+          const changes = await detector.getChanges();
+          const isStale = model.git.indexedCommit !== model.git.headCommit || changes.length > 0;
+          
+          indexStatusText = `  Index Status:     ${isStale ? chalk.yellow.bold('STALE (Requiere asaf index --incremental)') : chalk.green.bold('UP TO DATE')}
+  Commit Indexado:  ${chalk.gray(model.git.indexedCommit || 'N/A')}
+  Commit HEAD:      ${chalk.gray(model.git.headCommit || 'N/A')}
+  Archivos Sucios:  ${changes.length > 0 ? chalk.yellow(changes.length) : chalk.green('0')}
+  Última Actualiz.: ${chalk.gray(model.indexMetadata?.updatedAt || 'N/A')}`;
+        }
+      } catch (e) {}
+
+      console.log(chalk.blue.bold('\nASAF Project Intelligence - Estado del Proyecto\n'));
+      console.log(chalk.cyan.bold('Index & Git Engine:'));
+      console.log(indexStatusText);
+      console.log(chalk.bold('\n────────────────────────────────────────'));
       let graph: any = null;
       const graphPath = path.join(projectDir, 'asaf-graph.json');
       if (fs.existsSync(graphPath)) {
@@ -822,6 +866,96 @@ program
     }
   });
 
+// Comando: index
+program
+  .command('index')
+  .description('Analiza e indexa de forma determinista el árbol AST del proyecto guardándolo en .asaf/')
+  .option('--incremental', 'Indexa únicamente los archivos modificados desde la última ejecución', false)
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    const startTime = Date.now();
+
+    if (!options.json) {
+      console.log(chalk.blue.bold('\nASAF Project Intelligence - Indexing Engine\n'));
+    }
+
+    try {
+      const { DeterministicProjectIndexer } = require('../core/infrastructure/indexing/project-indexer');
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { GitChangeDetector } = require('../core/infrastructure/git/git-change-detector');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const indexer = new DeterministicProjectIndexer(projectDir);
+
+      let model;
+
+      if (options.incremental) {
+        const existingModel = await store.load();
+        if (!existingModel) {
+          if (!options.json) console.log(chalk.yellow('No se encontró un índice previo. Ejecutando indexación completa...'));
+          model = await indexer.index();
+        } else {
+          const detector = new GitChangeDetector(projectDir);
+          const changes = await detector.getChanges();
+          if (changes.length === 0) {
+            if (options.json) {
+              console.log(JSON.stringify({ message: 'Index is already up to date.', changes: 0 }, null, 2));
+              return;
+            }
+            console.log(chalk.green('✓ El índice ya se encuentra actualizado de forma incremental (0 cambios detectados).'));
+            return;
+          }
+          if (!options.json) console.log(chalk.gray(`Actualizando incrementalmente ${changes.length} archivos cambiados...`));
+          model = await indexer.update(existingModel, changes);
+        }
+      } else {
+        if (!options.json) console.log(chalk.gray('Escaneando archivos y parseando AST...'));
+        model = await indexer.index();
+      }
+
+      await store.save(model);
+
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+      if (options.json) {
+        console.log(JSON.stringify({
+          status: 'success',
+          duration,
+          files: model.files.length,
+          symbols: model.symbols.length,
+          relations: model.relations.length,
+          errors: model.indexMetadata.diagnostics.length
+        }, null, 2));
+        return;
+      }
+
+      console.log(chalk.green(`✓ ¡Indexación finalizada en ${duration}s!\n`));
+      console.log(`Proyecto:       ${chalk.bold(model.project.name)}`);
+      console.log(`Archivos:       ${model.files.length}`);
+      console.log(`Símbolos:       ${model.symbols.length}`);
+      console.log(`Relaciones:     ${model.relations.length}`);
+      console.log(`Diagnósticos:   ${model.indexMetadata.diagnostics.length > 0 ? chalk.yellow(model.indexMetadata.diagnostics.length) : chalk.green('0')}`);
+      console.log(`Ubicación:      .asaf/index/project.json`);
+
+      if (model.indexMetadata.diagnostics.length > 0) {
+        console.log(chalk.yellow.bold('\nDiagnósticos de indexación:'));
+        model.indexMetadata.diagnostics.forEach((d: any) => {
+          console.log(`  ⚠ ${d.file}: ${d.message}`);
+        });
+      }
+
+      console.log(chalk.bold('\n────────────────────────────────────────'));
+    } catch (error: any) {
+      if (options.json) {
+        console.log(JSON.stringify({ status: 'error', message: error.message }, null, 2));
+      } else {
+        console.error(chalk.red(`Error al indexar el proyecto: ${error.message}`));
+      }
+    }
+  });
+
 // Comando: run
 program
   .command('run <taskDescription>')
@@ -850,6 +984,485 @@ program
       await orchestrator.orchestrate(taskDescription);
     } catch (error: any) {
       console.error(chalk.red(`Error en la orquestación del Agent Runtime: ${error.message}`));
+    }
+  });
+
+// Grupo de comandos: graph
+const graphCmd = program
+  .command('graph')
+  .description('Navega y consulta la topología del grafo semántico e importaciones del proyecto');
+
+graphCmd
+  .command('dependencies <nodeId>')
+  .description('Muestra las dependencias directas y transitivas de un archivo o símbolo')
+  .option('-d, --depth <number>', 'Profundidad máxima de análisis', '1')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (nodeId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+      const { GraphResultFormatter } = require('../core/infrastructure/graph/graph-formatter');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const depth = options.depth === 'all' ? 'all' : parseInt(options.depth, 10);
+      const deps = engine.getDependencies(nodeId, { depth });
+
+      console.log(GraphResultFormatter.formatDependencies(nodeId, deps, options.json));
+    } catch (e: any) {
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'NODE_NOT_FOUND', message: e.message }, null, 2));
+      } else {
+        console.error(chalk.red(`Error: ${e.message}`));
+      }
+    }
+  });
+
+graphCmd
+  .command('dependents <nodeId>')
+  .description('Muestra los dependientes directos y transitivos de un archivo o símbolo')
+  .option('-d, --depth <number>', 'Profundidad máxima de análisis', '1')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (nodeId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+      const { GraphResultFormatter } = require('../core/infrastructure/graph/graph-formatter');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const depth = options.depth === 'all' ? 'all' : parseInt(options.depth, 10);
+      const deps = engine.getDependents(nodeId, { depth });
+
+      console.log(GraphResultFormatter.formatDependents(nodeId, deps, options.json));
+    } catch (e: any) {
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'NODE_NOT_FOUND', message: e.message }, null, 2));
+      } else {
+        console.error(chalk.red(`Error: ${e.message}`));
+      }
+    }
+  });
+
+graphCmd
+  .command('relations <nodeId>')
+  .description('Muestra las relaciones directas entrantes y salientes de un nodo')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (nodeId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const relations = engine.getRelations(nodeId);
+
+      if (options.json) {
+        console.log(JSON.stringify(relations, null, 2));
+      } else {
+        console.log(chalk.blue.bold(`\nRelaciones para: ${nodeId}`));
+        relations.forEach((r: any) => {
+          console.log(`  ${r.from} --[${r.type}]--> ${r.to}`);
+        });
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+graphCmd
+  .command('path <from> <to>')
+  .description('Encuentra el camino de dependencias (shortest path) entre dos nodos')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (from, to, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+      const { GraphResultFormatter } = require('../core/infrastructure/graph/graph-formatter');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const pathResult = engine.findPath(from, to);
+
+      console.log(GraphResultFormatter.formatPath(from, to, pathResult, options.json));
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+graphCmd
+  .command('metrics')
+  .description('Calcula métricas de salud y dependencias circulares de la topología')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+      const { GraphResultFormatter } = require('../core/infrastructure/graph/graph-formatter');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const metrics = engine.calculateMetrics();
+
+      console.log(GraphResultFormatter.formatMetrics(metrics, options.json));
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+graphCmd
+  .command('node <nodeId>')
+  .description('Inspecciona y describe un nodo específico en el grafo')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (nodeId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicGraphQueryEngine } = require('../core/infrastructure/graph/query-engine');
+      const { GraphResultFormatter } = require('../core/infrastructure/graph/graph-formatter');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        throw new Error('Proyecto no indexado. Ejecute primero "asaf index".');
+      }
+
+      const engine = new DeterministicGraphQueryEngine(model);
+      const node = engine.getNode(nodeId);
+      const relations = engine.getRelations(nodeId);
+
+      console.log(GraphResultFormatter.formatNode(node, relations, options.json));
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+// Comando: impact
+program
+  .command('impact [nodeId]')
+  .description('Analiza determinísticamente el impacto de modificar un archivo o símbolo en el proyecto')
+  .option('--changed', 'Analiza el impacto de todos los archivos modificados actualmente en Git', false)
+  .option('-d, --depth <number>', 'Profundidad de cascada en el análisis (número o "all")', 'all')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (nodeId, options) => {
+    const projectDir = process.cwd();
+    const { DeterministicImpactEngine } = require('../core/infrastructure/impact/impact-engine');
+    const { GitChangeDetector } = require('../core/infrastructure/git/git-change-detector');
+    const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+
+    try {
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const engine = new DeterministicImpactEngine(model);
+      const depth: number | 'all' = options.depth === 'all' ? 'all' : parseInt(options.depth, 10);
+
+      let targets: string[] = [];
+      if (options.changed) {
+        const detector = new GitChangeDetector(projectDir);
+        const changes = await detector.getChanges();
+        targets = changes
+          .filter((c: any) => c.type !== 'deleted')
+          .map((c: any) => c.path);
+        if (targets.length === 0) {
+          console.log(chalk.green('No hay archivos modificados en el working tree de Git.'));
+          return;
+        }
+      } else if (nodeId) {
+        targets = [nodeId];
+      } else {
+        console.error(chalk.red('Debe proveer un nodeId o especificar la bandera --changed.'));
+        process.exit(1);
+      }
+
+      const reports: any[] = [];
+      for (const target of targets) {
+        try {
+          const report = await engine.analyzeImpact(target, depth);
+          reports.push(report);
+        } catch (e: any) {
+          reports.push({
+            target,
+            status: 'error',
+            error: e.message
+          });
+        }
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(reports, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF Project Intelligence - Impact Analysis\n'));
+        for (const report of reports) {
+          if (report.status === 'error') {
+            console.log(`${chalk.bold(report.target)}  ${chalk.red('ERROR')}: ${report.error}`);
+          } else if (report.status === 'removed-from-index') {
+            console.log(`${chalk.bold(report.target)}  ${chalk.gray('ELIMINADO DEL ÍNDICE')}`);
+          } else {
+            const riskColor = report.risk.level === 'HIGH'
+              ? chalk.red.bold
+              : report.risk.level === 'MEDIUM'
+                ? chalk.yellow.bold
+                : chalk.green.bold;
+            console.log(`Target:              ${chalk.bold(report.target)}`);
+            console.log(`Riesgo:              ${riskColor(report.risk.level)} (score: ${report.risk.score.toFixed(1)})`);
+            console.log(`Razón:               ${report.risk.reason}`);
+            console.log(`Nodos Afectados:     ${report.metrics.affectedNodes}`);
+            console.log(`APIs Comprometidas:  ${report.metrics.affectedApis}`);
+            console.log(`BBDD Comprometidas:  ${report.metrics.affectedDatabases}`);
+            console.log(`Tests Comprometidos: ${report.metrics.affectedTests}`);
+            console.log(`Fan-in:              ${report.metrics.fanIn}`);
+            console.log(`Fan-out:             ${report.metrics.fanOut}`);
+            console.log(`Profundidad Max:     ${report.metrics.maxDepth}`);
+            if (report.architectureBoundariesCrossed && report.architectureBoundariesCrossed.length > 0) {
+              console.log(chalk.red.bold('\nLímites Arquitectónicos Cruzados:'));
+              report.architectureBoundariesCrossed.forEach((b: string) => {
+                console.log(`  ⚠ ${chalk.yellow(b)}`);
+              });
+            }
+            if (report.affectedADRs && report.affectedADRs.length > 0) {
+              console.log(chalk.red.bold('\nDecisiones Arquitectónicas Afectadas (ADRs):'));
+              report.affectedADRs.forEach((a: any) => {
+                console.log(`  ⚠ ${chalk.yellow.bold(a.id)}: ${a.title} (${chalk.cyan(a.status)})`);
+                console.log(`    Razón: ${a.reason}`);
+                console.log(`    Trazabilidad: ${a.evidence.path.join(' ➔ ')}`);
+              });
+            }
+          }
+          console.log(chalk.gray('────────────────────────────────────────'));
+        }
+      }
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// Comando: adr
+const adrCmd = program
+  .command('adr')
+  .description('Herramientas de Inteligencia y Gobernanza de Decisiones de Arquitectura (ADR)');
+
+adrCmd
+  .command('list')
+  .description('Lista todas las decisiones de arquitectura (ADRs) registradas')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicADRIntelligenceEngine } = require('../core/infrastructure/adr/adr-intelligence-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const adrEngine = new DeterministicADRIntelligenceEngine(model);
+      const adrs = adrEngine.listADRs();
+
+      if (options.json) {
+        console.log(JSON.stringify(adrs, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF Architecture Decisions - Catálogo de ADRs\n'));
+        if (adrs.length === 0) {
+          console.log(chalk.yellow('No hay decisiones de arquitectura indexadas.'));
+        } else {
+          adrs.forEach((adr: any) => {
+            const statusColor = adr.status === 'accepted' ? chalk.green : adr.status === 'deprecated' ? chalk.red : chalk.yellow;
+            console.log(`- ${chalk.bold(adr.id)}: ${adr.title} [${statusColor(adr.status)}]`);
+          });
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al listar ADRs: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+adrCmd
+  .command('show <adrId>')
+  .description('Muestra los detalles estructurados de un ADR específico')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (adrId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicADRIntelligenceEngine } = require('../core/infrastructure/adr/adr-intelligence-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const adrEngine = new DeterministicADRIntelligenceEngine(model);
+      const adr = adrEngine.getADR(adrId);
+
+      if (!adr) {
+        console.error(chalk.red(`No se encontró el ADR con ID "${adrId}".`));
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(adr, null, 2));
+      } else {
+        const statusColor = adr.status === 'accepted' ? chalk.green : adr.status === 'deprecated' ? chalk.red : chalk.yellow;
+        console.log(chalk.blue.bold(`\n=== Decision Record: ${adr.id} ===`));
+        console.log(`Título:       ${chalk.bold(adr.title)}`);
+        console.log(`Estado:       ${statusColor(adr.status)}`);
+        if (adr.date) console.log(`Fecha:        ${adr.date}`);
+        if (adr.supersedes) console.log(`Reemplaza a:  ${adr.supersedes.join(', ')}`);
+        if (adr.supersededBy) console.log(`Reemplazado por: ${adr.supersededBy}`);
+        if (adr.tags) console.log(`Tags:         ${adr.tags.join(', ')}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+        if (adr.context) {
+          console.log(chalk.bold('\nContexto:'));
+          console.log(adr.context);
+        }
+        if (adr.decision) {
+          console.log(chalk.bold('\nDecisión:'));
+          console.log(adr.decision);
+        }
+        if (adr.consequences) {
+          console.log(chalk.bold('\nConsecuencias:'));
+          console.log(adr.consequences);
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al mostrar ADR: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+adrCmd
+  .command('check')
+  .description('Audita la consistencia bidireccional y la salud del catálogo de ADRs')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicADRIntelligenceEngine } = require('../core/infrastructure/adr/adr-intelligence-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const adrEngine = new DeterministicADRIntelligenceEngine(model);
+      const report = adrEngine.validateADRConsistency();
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF ADR Catalog - Auditoría de Consistencia\n'));
+        if (report.isValid) {
+          console.log(chalk.green.bold('✓ ¡Auditoría exitosa! El catálogo de ADRs y sus relaciones en el grafo son 100% consistentes.'));
+        } else {
+          console.log(chalk.red.bold(`✗ Se detectaron ${report.issues.length} inconsistencias en el catálogo de decisiones:\n`));
+          report.issues.forEach((issue: string, idx: number) => {
+            console.log(`  ${chalk.red(idx + 1)}. ${issue}`);
+          });
+        }
+        console.log();
+      }
+
+      if (!report.isValid) {
+        process.exit(1);
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al auditar ADRs: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+adrCmd
+  .command('impact <adrId>')
+  .description('Muestra los archivos y dependientes del código gobernados por este ADR')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (adrId, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { DeterministicADRIntelligenceEngine } = require('../core/infrastructure/adr/adr-intelligence-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const adrEngine = new DeterministicADRIntelligenceEngine(model);
+      const adr = adrEngine.getADR(adrId);
+      if (!adr) {
+        console.error(chalk.red(`No se encontró el ADR con ID "${adrId}".`));
+        process.exit(1);
+      }
+
+      const nodes = adrEngine.findRelatedNodes(adrId);
+
+      if (options.json) {
+        console.log(JSON.stringify({ adrId, title: adr.title, governedNodes: nodes }, null, 2));
+      } else {
+        console.log(chalk.blue.bold(`\nADR Impact & Coverage: ${adr.id} — ${adr.title}\n`));
+        console.log(`Estado:       ${adr.status}`);
+        console.log(`Nodos Código Gobernados Directa o Transitivamente: ${chalk.cyan(nodes.length)}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+        if (nodes.length === 0) {
+          console.log(chalk.yellow('No hay archivos ni símbolos vinculados a esta decisión arquitectónica.'));
+        } else {
+          nodes.forEach((node: string) => {
+            console.log(`  ➔ ${chalk.green(node)}`);
+          });
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al evaluar impacto de ADR: ${e.message}`));
+      process.exit(1);
     }
   });
 

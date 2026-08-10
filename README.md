@@ -17,7 +17,9 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **Architecture Governance Dinámico (Linter de Capas):** Linter de arquitectura configurable a través de `asaf.json` que valida dependencias de importación en Clean Architecture o DDD, vinculándose directamente a Decisiones de Arquitectura (ADRs).
 * **Task & Impact Intelligence:** Evalúa tareas en lenguaje natural (`asaf task`) mapeando archivos impactados, dependencias en cascada y estimando el riesgo y presupuesto de tokens (`Context Budget`).
 * **Quality & Security SAST Integrations:** Orquesta herramientas de análisis estático externas de seguridad y linter líderes (como `ESLint` para JS/TS y `Bandit` para Python), consolidando los hallazgos en un reporte ejecutivo.
-* **CLI Project Status & Technical Debt Dashboard:** Mapea la salud de tu repositorio en un Dashboard de consola visual (`asaf status`) con barras de progreso coloreadas y estimación de horas de Deuda Técnica.
+* **Deterministic AST Indexer & Incremental Updates:** Motor de indexación quirúrgica incremental basado en hashes SHA-256 y Git change tracking que analiza el AST nativo del repositorio sin expresiones regulares ni dependencia de LLMs, poblando el `ProjectModel` de manera rápida e idempotente.
+* **Graph Core & Semantic Query Engine:** Motor relacional matemático que expone dependencias e importaciones transitivas a nivel File y Symbol, calcula caminos más cortos (`shortest path`), detecta dependencias circulares complejas (mediante Strongly Connected Components - Tarjan) y computa métricas de acoplamiento (Fan-in / Fan-out).
+* **CLI Project Status & Technical Debt Dashboard:** Mapea la salud de tu repositorio en un Dashboard de consola visual (`asaf status`) con barras de progreso coloreadas, estado de Git y de la indexación incremental, y estimación de horas de Deuda Técnica.
 * **Agent Runtime & Multi-agent Orchestration:** Secuencia interactiva de agentes virtuales (Solution Architect, Backend, DBA, QA) con verificación post-ejecución para evitar regresiones de calidad en cada tarea (`asaf run`).
 * **Universal Agent Bridge (MCP Server):** Servidor native MCP (Model Context Protocol) sobre stdio para inyectar contexto y gobernanza directamente en asistentes de IA líderes como Cursor, Cline o Claude Code.
 
@@ -32,7 +34,7 @@ ASAF/
 ├── blueprints/      # Plantillas de arquitectura de referencia (Clean Architecture, DDD).
 ├── cli/             # Interfaz de línea de comandos (CLI) principal de ASAF.
 ├── context/         # Motor de slicing sintáctico y vinculación de ADRs en prompts.
-├── core/            # Núcleo de gobernanza, linter dinámico, specs, status y auditoría SAST.
+├── core/            # Núcleo de gobernanza, linter dinámico, specs, status, indexación incremental y grafo.
 ├── discovery/       # Analizador AST con adaptadores modulares y grafos semánticos.
 ├── docs/            # Documentación de interfaces de comunicación y especificaciones de APIs.
 ├── generators/      # Generadores de infraestructura (Docker, Terraform, CI/CD).
@@ -51,36 +53,62 @@ npx asaf init
 ```
 
 ### 2. `asaf status`
-Muestra el Dashboard de salud consolidado de forma visual con barras de progreso, estimación de Deuda Técnica (horas de corrección) y findings abiertos.
+Muestra el Dashboard de salud consolidado de forma visual con barras de progreso, estado de consistencia del índice Git, estimación de Deuda Técnica (horas de corrección) y findings abiertos.
 ```bash
 npx asaf status
 ```
 
-### 3. `asaf task "<desc>"`
+### 3. `asaf index`
+Ejecuta la indexación determinista completa del AST del proyecto. Soporta la bandera `--incremental` para analizar únicamente archivos modificados en Git y el flag `--json` para agentes IA.
+```bash
+# Indexación completa
+npx asaf index
+
+# Indexación incremental rápida
+npx asaf index --incremental
+```
+
+### 4. `asaf graph`
+Grupo de comandos para consultar y analizar la topología relacional del proyecto sin LLM:
+```bash
+# Consultar dependencias directas/transitivas de un símbolo o archivo
+npx asaf graph dependencies <nodeId> --depth <number|all>
+
+# Consultar dependientes directos/transitivos de un símbolo o archivo
+npx asaf graph dependents <nodeId> --depth <number|all>
+
+# Buscar el camino de dependencias (shortest path) entre dos componentes
+npx asaf graph path <from> <to>
+
+# Visualizar métricas generales, Fan-in/out y dependencias circulares (Tarjan SCC)
+npx asaf graph metrics
+```
+
+### 5. `asaf task "<desc>"`
 Analiza una tarea de desarrollo prediciendo el impacto, dependencias afectadas, ADRs relacionados y entregando un plan paso a paso.
 ```bash
 npx asaf task "Implementar autenticación JWT en controladores de usuarios"
 ```
 
-### 4. `asaf run "<desc>"`
+### 6. `asaf run "<desc>"`
 Inicia la orquestación interactiva del Agent Runtime, secuenciando los turnos de los agentes requeridos con flujos de aprobación y validación final de deuda técnica.
 ```bash
 npx asaf run "Refactorizar y probar el linter de governance"
 ```
 
-### 5. `asaf mcp`
+### 7. `asaf mcp`
 Inicia el servidor Model Context Protocol (MCP) de ASAF sobre transporte `stdio` para integrarse con asistentes IA externos.
 ```bash
 npx asaf mcp
 ```
 
-### 6. `asaf audit`
+### 8. `asaf audit`
 Ejecuta la auditoría general, orquestando herramientas SAST locales (ESLint y Bandit) y generando un informe en `docs/audit-report.md`.
 ```bash
 npx asaf audit
 ```
 
-### 7. `asaf check`
+### 9. `asaf check`
 Audita el linter de capas arquitectónicas leyendo las reglas de `asaf.json`. Retorna código `exit 1` en caso de fallos (ideal para CI/CD).
 ```bash
 npx asaf check
