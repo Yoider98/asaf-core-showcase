@@ -31,4 +31,6 @@ export interface GraphQueryEngine {
   getRelations(nodeId: string): Relation[];
   findPath(from: string, to: string, options?: GraphQueryOptions): GraphPath | null;
   calculateMetrics(): GraphMetrics;
+  getDependenciesWithDistance(nodeId: string, maxDepth?: number): any[];
+  getDependentsWithDistance(nodeId: string, maxDepth?: number): any[];
 }

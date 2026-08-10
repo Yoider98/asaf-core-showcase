@@ -57,6 +57,82 @@ export class DeterministicGraphQueryEngine implements GraphQueryEngine {
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 
+  public getDependenciesWithDistance(nodeId: string, maxDepth: number = 10): any[]  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }[] = [];
+
+    const directDeps = Array.from(this.adjacencyIndex.get(nodeId)?.keys() || []);
+    directDeps.forEach(d => {
+      if (!visited.has(d)) {
+        visited.add(d);
+        queue.push({ id: d, distance: 1, path: [nodeId, d] });
+      }
+    });
+
+    while (queue.length > 0)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+
+      if (current.distance < maxDepth && !current.id.startsWith('adr:') && !current.id.startsWith('rule:')) {
+        const nextDeps = Array.from(this.adjacencyIndex.get(current.id)?.keys() || []);
+        nextDeps.forEach(nd => {
+          if (!visited.has(nd)) {
+            visited.add(nd);
+            queue.push({
+              id: nd,
+              distance: current.distance + 1,
+              path: [...current.path, nd]
+            });
+          }
+        });
+      }
+    }
+
+    return results;
+  }
+
+  public getDependentsWithDistance(nodeId: string, maxDepth: number = 10): any[]  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }[] = [];
+
+    const directDeps = Array.from(this.reverseAdjacencyIndex.get(nodeId)?.keys() || []);
+    directDeps.forEach(d => {
+      if (!visited.has(d)) {
+        visited.add(d);
+        queue.push({ id: d, distance: 1, path: [nodeId, d] });
+      }
+    });
+
+    while (queue.length > 0)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+
+      if (current.distance < maxDepth && !current.id.startsWith('adr:') && !current.id.startsWith('rule:')) {
+        const nextDeps = Array.from(this.reverseAdjacencyIndex.get(current.id)?.keys() || []);
+        nextDeps.forEach(nd => {
+          if (!visited.has(nd)) {
+            visited.add(nd);
+            queue.push({
+              id: nd,
+              distance: current.distance + 1,
+              path: [...current.path, nd]
+            });
+          }
+        });
+      }
+    }
+
+    return results;
+  }
+
   private traverseIterative(
     startNode: string,
     adjIndex: Map<string, Map<string, Relation>>,

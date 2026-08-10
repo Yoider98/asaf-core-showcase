@@ -16,6 +16,8 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **Language Adapters (AST Modulado):** El motor de descubrimiento (`DiscoveryEngine`) analiza de forma agnóstica el árbol de sintaxis abstracta (AST) de múltiples lenguajes mediante adaptadores modulares.
 * **Architecture Governance Dinámico (Linter de Capas):** Linter de arquitectura configurable a través de `asaf.json` que valida dependencias de importación en Clean Architecture o DDD, vinculándose directamente a Decisiones de Arquitectura (ADRs).
 * **Task & Impact Intelligence:** Evalúa tareas en lenguaje natural (`asaf task`) mapeando archivos impactados, dependencias en cascada y estimando el riesgo y presupuesto de tokens (`Context Budget`).
+* **ADR Intelligence Engine (v0.2.6):** Los ADRs dejan de ser documentación pasiva y se convierten en entidades semánticas del grafo. ASAF indexa, traza y audita automáticamente la consistencia entre decisiones de arquitectura y el código fuente real, detectando ciclos y relaciones rotas de forma determinista.
+* **Context Intelligence Engine (v0.2.7):** Motor unificado que clasifica, recorta y empaqueta de forma óptima el contexto mínimo necesario para los modelos de IA. Incluye slicing AST de cuatro niveles (`FULL`, `STRUCTURAL`, `SIGNATURE`, `MINIMAL`, `EXCLUDE`), ranking explicable por distancia BFS del grafo, y un planificador de presupuesto de tokens sobre el objeto `AIContext` serializado completo.
 * **Quality & Security SAST Integrations:** Orquesta herramientas de análisis estático externas de seguridad y linter líderes (como `ESLint` para JS/TS y `Bandit` para Python), consolidando los hallazgos en un reporte ejecutivo.
 * **Deterministic AST Indexer & Incremental Updates:** Motor de indexación quirúrgica incremental basado en hashes SHA-256 y Git change tracking que analiza el AST nativo del repositorio sin expresiones regulares ni dependencia de LLMs, poblando el `ProjectModel` de manera rápida e idempotente.
 * **Graph Core & Semantic Query Engine:** Motor relacional matemático que expone dependencias e importaciones transitivas a nivel File y Symbol, calcula caminos más cortos (`shortest path`), detecta dependencias circulares complejas (mediante Strongly Connected Components - Tarjan) y computa métricas de acoplamiento (Fan-in / Fan-out).
@@ -35,6 +37,7 @@ ASAF/
 ├── cli/             # Interfaz de línea de comandos (CLI) principal de ASAF.
 ├── context/         # Motor de slicing sintáctico y vinculación de ADRs en prompts.
 ├── core/            # Núcleo de gobernanza, linter dinámico, specs, status, indexación incremental y grafo.
+│   └── context/     # Context Intelligence Engine: CodeSlicer, ContextRanker, ContextBudget, UnifiedContextEngine.
 ├── discovery/       # Analizador AST con adaptadores modulares y grafos semánticos.
 ├── docs/            # Documentación de interfaces de comunicación y especificaciones de APIs.
 ├── generators/      # Generadores de infraestructura (Docker, Terraform, CI/CD).
@@ -90,31 +93,44 @@ Analiza una tarea de desarrollo prediciendo el impacto, dependencias afectadas, 
 npx asaf task "Implementar autenticación JWT en controladores de usuarios"
 ```
 
-### 6. `asaf run "<desc>"`
+### 6. `asaf context [task]`
+Construye el contexto óptimo para modelos de IA usando el **Context Intelligence Engine**. Resuelve targets desde archivos explícitos, cambios Git o palabras clave de la tarea, aplica ranking por BFS y recorta el código al presupuesto de tokens especificado.
+```bash
+# Contexto por tarea semántica
+npx asaf context "Implementar autenticación JWT"
+
+# Contexto de archivos específicos con explicación del ranking
+npx asaf context --file src/auth/auth.service.ts --explain
+
+# Limitar el contexto a un presupuesto estricto de tokens
+npx asaf context --file src/auth/auth.controller.ts --budget 8000 --json
+```
+
+### 7. `asaf run "<desc>"`
 Inicia la orquestación interactiva del Agent Runtime, secuenciando los turnos de los agentes requeridos con flujos de aprobación y validación final de deuda técnica.
 ```bash
 npx asaf run "Refactorizar y probar el linter de governance"
 ```
 
-### 7. `asaf mcp`
+### 8. `asaf mcp`
 Inicia el servidor Model Context Protocol (MCP) de ASAF sobre transporte `stdio` para integrarse con asistentes IA externos.
 ```bash
 npx asaf mcp
 ```
 
-### 8. `asaf audit`
+### 9. `asaf audit`
 Ejecuta la auditoría general, orquestando herramientas SAST locales (ESLint y Bandit) y generando un informe en `docs/audit-report.md`.
 ```bash
 npx asaf audit
 ```
 
-### 9. `asaf check`
+### 10. `asaf check`
 Audita el linter de capas arquitectónicas leyendo las reglas de `asaf.json`. Retorna código `exit 1` en caso de fallos (ideal para CI/CD).
 ```bash
 npx asaf check
 ```
 
-### 10. `asaf adr`
+### 11. `asaf adr`
 Grupo de comandos para la gobernanza e inteligencia de Decisiones de Arquitectura (ADRs) vinculadas al grafo semántico:
 ```bash
 # Listar todas las decisiones de arquitectura indexadas
@@ -132,6 +148,20 @@ npx asaf adr impact <adrId> [--json]
 
 ---
 
+## 🔌 Herramientas MCP Disponibles
+
+| Herramienta | Descripción |
+|---|---|
+| `asaf_build_context` | Construye el `AIContext` optimizado para una tarea o conjunto de archivos con budget de tokens. |
+| `asaf_get_semantic_context` | Retorna dependencias, símbolos y tests relacionados de un nodo del grafo. |
+| `asaf_analyze_task` | Analiza el impacto de una tarea en lenguaje natural sobre el grafo del proyecto. |
+| `asaf_check_governance` | Audita las violaciones de capas de arquitectura según las reglas de `asaf.json`. |
+| `asaf_get_graph_metrics` | Expone métricas de acoplamiento, Fan-in/out y SCC del grafo. |
+| `asaf_check_adrs` | Valida la consistencia de los ADRs indexados detectando relaciones rotas y ciclos. |
+| `asaf_get_adr_impact` | Traza qué archivos están gobernados por un ADR a través del grafo determinista. |
+
+---
+
 ## 📖 Guía de Adopción e Integración de Agentes (Cursor / Cline / Claude Code)
 
 1. **Inicializar y Configurar:**
@@ -139,7 +169,21 @@ npx asaf adr impact <adrId> [--json]
 2. **Levantar el Servidor MCP:**
    Registra el comando `node <path-to-asaf>/dist/cli/index.js mcp` en tu configuración de MCP de Cursor o Cline.
 3. **Consumir Herramientas:**
-   Los asistentes llamarán de forma automática a `asaf_get_semantic_context`, `asaf_check_governance` y `asaf_analyze_task` para auto-limitarse al contexto mínimo de tokens y asegurar la calidad estructural del proyecto.
+   Los asistentes llamarán de forma automática a `asaf_build_context`, `asaf_check_governance` y `asaf_analyze_task` para auto-limitarse al contexto mínimo de tokens y asegurar la calidad estructural del proyecto.
+
+---
+
+## 🗺️ Roadmap de Versiones
+
+| Versión | Descripción |
+|---|---|
+| `v0.2.1` | Core Graph Engine + Shortest Path + SCC |
+| `v0.2.2` | Indexación incremental + Git tracking |
+| `v0.2.3` | Impact Engine determinista |
+| `v0.2.4` | Architecture Governance Engine |
+| `v0.2.5` | Specs Engine |
+| `v0.2.6` | **ADR Intelligence Engine** — ADRs como entidades semánticas del grafo |
+| `v0.2.7` | **Context Intelligence Engine** — CodeSlicer AST, ranking BFS explicable, planificador de budget serializado |
 
 ---
 

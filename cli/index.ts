@@ -1466,6 +1466,85 @@ adrCmd
     }
   });
 
+// Comando: context
+program
+  .command('context [taskDescription]')
+  .description('Construye y optimiza el contexto determinista enfocado en una tarea')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .option('--budget <tokens>', 'Establece el límite máximo de tokens para el contexto', '10000')
+  .option('--file <filePath>', 'Analiza el contexto tomando un archivo como target explícito')
+  .option('--explain', 'Muestra la explicación del ranking del contexto', false)
+  .action(async (taskDescription, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { UnifiedContextEngine } = require('../core/context/context-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      const budget = parseInt(options.budget, 10);
+      const files = options.file ? [options.file] : [];
+      const engine = new UnifiedContextEngine(model);
+      
+      const context = await engine.buildContext({
+        task: taskDescription,
+        files,
+        budget,
+        explain: options.explain
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(context, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF Context Intelligence — Contexto Optimizado\n'));
+        console.log(`Tarea:               ${chalk.bold(context.task)}`);
+        console.log(`Presupuesto Máximo:  ${context.budget.requested} tokens`);
+        console.log(`Seleccionado:        ${context.budget.selected} tokens (Ahorro significativo)`);
+        console.log(`Archivos del Target: ${context.target.files.join(', ') || 'Ninguno (Git limpio)'}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+        
+        if (context.codeSlices.length > 0) {
+          console.log(chalk.bold('\nEstructura de Código Relevante (Slices):'));
+          context.codeSlices.forEach((slice: any) => {
+            console.log(`  ➔ ${chalk.green(slice.filePath)} [Nivel: ${slice.level}] (${slice.estimatedTokens} tokens)`);
+          });
+        }
+
+        if (context.decisions.length > 0) {
+          console.log(chalk.bold('\nDecisiones Arquitectónicas Vinculadas (ADRs):'));
+          context.decisions.forEach((adr: any) => {
+            console.log(`  ⚠ ${chalk.yellow(adr.id)}: ${adr.title}`);
+          });
+        }
+
+        if (context.evidence.length > 0) {
+          console.log(chalk.bold('\nTrazabilidad Física (Evidencia):'));
+          context.evidence.forEach((ev: any) => {
+            console.log(`  ✓ ${ev.claim}`);
+            console.log(`    Camino: ${ev.path.join(' ➔ ')}`);
+          });
+        }
+
+        if (options.explain && context.explain) {
+          console.log(chalk.bold('\nExplicación del Ranking de Contexto (Explain):'));
+          context.explain.forEach((item: any) => {
+            console.log(`  ➔ [Prioridad ${item.priority}] ${chalk.cyan(item.id)} (${item.type})`);
+            console.log(`     Razón: ${item.reason}`);
+          });
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al procesar contexto: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
 // Comando: mcp
 program
   .command('mcp')

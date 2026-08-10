@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { DependencyGraph } from '../discovery/index';
-import { ContextEngine } from '../context';
+import { TokenEstimator } from './context/token-estimator';
 
 export interface TaskAnalysisReport {
   task: string;
