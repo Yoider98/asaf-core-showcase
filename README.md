@@ -114,6 +114,22 @@ Audita el linter de capas arquitectónicas leyendo las reglas de `asaf.json`. Re
 npx asaf check
 ```
 
+### 10. `asaf adr`
+Grupo de comandos para la gobernanza e inteligencia de Decisiones de Arquitectura (ADRs) vinculadas al grafo semántico:
+```bash
+# Listar todas las decisiones de arquitectura indexadas
+npx asaf adr list [--json]
+
+# Mostrar detalles estructurados y contexto de un ADR específico
+npx asaf adr show <adrId> [--json]
+
+# Auditar la consistencia bidireccional y detectar ciclos o relaciones rotas en los ADRs
+npx asaf adr check [--json]
+
+# Consultar qué partes del código están gobernadas directa o transitivamente por un ADR
+npx asaf adr impact <adrId> [--json]
+```
+
 ---
 
 ## 📖 Guía de Adopción e Integración de Agentes (Cursor / Cline / Claude Code)
