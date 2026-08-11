@@ -258,10 +258,85 @@ program
 // Comando: analyze
 program
   .command('analyze')
-  .description('Analiza el proyecto actual y genera un grafo de dependencias local')
+  .argument('[taskDescription]', 'Descripción de la tarea de desarrollo')
+  .description('Analiza el proyecto actual y genera un grafo de dependencias local, o produce un diagnóstico descriptivo sobre el grafo y la arquitectura para una tarea')
   .option('-d, --dir <path>', 'Directorio a analizar', '.')
-  .action(async (options) => {
+  .option('--file <filePath>', 'Analiza tomando un archivo como target explícito')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (taskDescription, options) => {
     const projectDir = path.resolve(options.dir);
+
+    // Lógica v0.2.8: Diagnóstico descriptivo para una tarea o archivo explícito
+    if (taskDescription || options.file) {
+      try {
+        const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+        const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
+
+        const store = new FileProjectIndexStore(projectDir);
+        const model = await store.load();
+        if (!model) {
+          console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+          process.exit(1);
+        }
+
+        const task = taskDescription || `Análisis para archivo ${options.file}`;
+        const reasoner = new ArchitecturalReasoner(model);
+        const plan = await reasoner.plan(task, {
+          explicitFiles: options.file ? [options.file] : [],
+          expandGraph: true
+        });
+
+        if (options.json) {
+          console.log(JSON.stringify(plan, null, 2));
+        } else {
+          console.log(chalk.blue.bold('\nASAF Architectural Analysis - Diagnóstico descriptivo\n'));
+          console.log(`Tarea:             ${chalk.bold(plan.task)}`);
+          console.log(`Intención:         ${chalk.cyan(plan.intent.action)} (Confianza: ${plan.intent.confidence})`);
+          console.log(`Áreas Técnicas:    ${plan.intent.technicalAreas.join(', ') || 'Ninguna detectada'}`);
+          console.log(`Conceptos:         ${plan.intent.concepts.join(', ') || 'Ninguno'}`);
+          console.log(`Targets:           ${plan.targets.join(', ') || 'Ninguno'}`);
+          console.log(chalk.gray('────────────────────────────────────────'));
+
+          console.log(chalk.bold('\nImpacto Estimado en el Grafo:'));
+          console.log(`  Nodos Afectados:   ${plan.impact.affectedNodes.length}`);
+          console.log(`  APIs Afectadas:    ${plan.changes.filter((c: any) => c.path.startsWith('api:')).length}`);
+          console.log(`  BD Afectadas:      ${plan.changes.filter((c: any) => c.path.startsWith('db:')).length}`);
+          console.log(`  Tests Afectados:   ${plan.tests.affected.length}`);
+
+          console.log(chalk.bold('\nRiesgo y Severidad:'));
+          console.log(`  Score de Riesgo:   ${plan.summary.riskScore} / 100`);
+          console.log(`  Severidad:         ${chalk.bold(plan.summary.complexity)}`);
+          if (plan.risks.length > 0) {
+            console.log(chalk.gray('  Factores de Riesgo:'));
+            plan.risks.forEach((r: any) => {
+              const sign = r.contribution > 0 ? '+' : '';
+              console.log(`    ${sign}${r.contribution} ${chalk.yellow(r.category)}: ${r.reason}`);
+            });
+          }
+
+          if (plan.architecture.violations.length > 0) {
+            console.log(chalk.red.bold('\nViolaciones de Gobernanza Activas:'));
+            plan.architecture.violations.forEach((v: any) => {
+              console.log(`  ✗ [${chalk.red(v.severity)}] ${v.ruleId}: ${v.description}`);
+            });
+          }
+
+          if (plan.architecture.affectedADRs.length > 0) {
+            console.log(chalk.bold('\nDecisiones de Arquitectura (ADRs) Mapeadas:'));
+            plan.architecture.affectedADRs.forEach((a: any) => {
+              console.log(`  ✓ ${chalk.yellow(a.adrId)}: ${a.title} [Status: ${a.status}] (${a.impactType})`);
+            });
+          }
+          console.log();
+        }
+      } catch (e: any) {
+        console.error(chalk.red(`Error al analizar la tarea: ${e.message}`));
+        process.exit(1);
+      }
+      return;
+    }
+
+    // Lógica v0.2.7 original: Descubrimiento de dependencias global
     console.log(chalk.blue(`Iniciando el análisis del proyecto en: ${projectDir}`));
 
     try {
@@ -763,7 +838,7 @@ program
       console.log(chalk.bold('--- REPORT EXECUTIVE OF TASK PLANNING ---'));
       console.log(`Nivel de Riesgo Técnico: ${report.risk === 'alto' ? chalk.red.bold('ALTO') : report.risk === 'medio' ? chalk.yellow.bold('MEDIO') : chalk.green.bold('BAJO')}`);
       console.log(`Budget de Contexto Estimado: ${chalk.magenta(`${report.estimatedTokens} tokens`)}`);
-      
+
       console.log(chalk.cyan('\n📂 Archivos involucrados y bajo impacto (Slicing):'));
       report.estimatedFiles.forEach((file: string) => {
         console.log(`  - ${chalk.yellow(file)}`);
@@ -804,21 +879,21 @@ program
       try {
         const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
         const { GitChangeDetector } = require('../core/infrastructure/git/git-change-detector');
-        
+
         const store = new FileProjectIndexStore(projectDir);
         const model = await store.load();
         if (model) {
           const detector = new GitChangeDetector(projectDir);
           const changes = await detector.getChanges();
           const isStale = model.git.indexedCommit !== model.git.headCommit || changes.length > 0;
-          
+
           indexStatusText = `  Index Status:     ${isStale ? chalk.yellow.bold('STALE (Requiere asaf index --incremental)') : chalk.green.bold('UP TO DATE')}
   Commit Indexado:  ${chalk.gray(model.git.indexedCommit || 'N/A')}
   Commit HEAD:      ${chalk.gray(model.git.headCommit || 'N/A')}
   Archivos Sucios:  ${changes.length > 0 ? chalk.yellow(changes.length) : chalk.green('0')}
   Última Actualiz.: ${chalk.gray(model.indexMetadata?.updatedAt || 'N/A')}`;
         }
-      } catch (e) {}
+      } catch (e) { }
 
       console.log(chalk.blue.bold('\nASAF Project Intelligence - Estado del Proyecto\n'));
       console.log(chalk.cyan.bold('Index & Git Engine:'));
@@ -1466,6 +1541,238 @@ adrCmd
     }
   });
 
+// Comando: plan
+program
+  .command('plan')
+  .argument('[taskDescription]', 'Descripción de la tarea de desarrollo')
+  .description('Genera un plan de cambio arquitectónico accionable para una tarea de desarrollo')
+  .option('--file <filePath>', 'Analiza tomando un archivo como target explícito')
+  .option('--budget <tokens>', 'Establece el límite máximo de tokens para el contexto', '10000')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (taskDescription, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      if (!taskDescription && !options.file) {
+        console.error(chalk.red('Debe proporcionar una descripción de tarea o un archivo explícito con --file.'));
+        process.exit(1);
+      }
+
+      const task = taskDescription || `Plan para archivo ${options.file}`;
+      const budget = parseInt(options.budget, 10);
+      const reasoner = new ArchitecturalReasoner(model);
+      const plan = await reasoner.plan(task, {
+        explicitFiles: options.file ? [options.file] : [],
+        expandGraph: true,
+        budget
+      });
+      const { PlanningEngine } = require('../core/planning/planning-engine');
+      const planningEngine = new PlanningEngine(model);
+      const planningResult = planningEngine.plan(plan);
+
+      if (options.json) {
+        console.log(JSON.stringify(planningResult, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\n================================================'));
+        console.log(chalk.blue.bold('       ASAF Architectural Change Plan           '));
+        console.log(chalk.blue.bold('================================================\n'));
+        console.log(`Tarea:         ${chalk.bold(planningResult.changePlan.task)}`);
+        console.log(`Riesgo Global: ${planningResult.summary.riskScore} / 100 (${chalk.bold(planningResult.summary.complexity)})`);
+        console.log(`Complejidad:   ${chalk.bold(planningResult.summary.complexity)}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+
+        console.log(chalk.bold('\n1. Cambios Requeridos (Priorizados):'));
+        planningResult.changePlan.changes.forEach((change: any) => {
+          let actionColor = chalk.cyan;
+          if (change.action === 'CREATE') actionColor = chalk.green;
+          else if (change.action === 'DELETE') actionColor = chalk.red;
+          else if (change.action === 'TEST') actionColor = chalk.yellow;
+          else if (change.action === 'REVIEW') actionColor = chalk.magenta;
+
+          console.log(`  [Prio ${change.priority}] ${actionColor.bold(change.action)} ${chalk.green(change.path)}`);
+          console.log(`    Razón: ${change.reason}`);
+          if (change.dependencies.length > 0) {
+            console.log(`    Depende de: ${change.dependencies.join(', ')}`);
+          }
+        });
+
+        console.log(chalk.bold('\n2. Delta de Arquitectura Proyectada:'));
+        if (planningResult.architectureDelta.addedNodes.length > 0) {
+          console.log(chalk.green(`  [+] Nodos Agregados: ${planningResult.architectureDelta.addedNodes.map((n: any) => n.id).join(', ')}`));
+        }
+        if (planningResult.architectureDelta.removedNodes.length > 0) {
+          console.log(chalk.red(`  [-] Nodos Removidos: ${planningResult.architectureDelta.removedNodes.map((n: any) => n.id).join(', ')}`));
+        }
+        if (planningResult.architectureDelta.modifiedNodes.length > 0) {
+          console.log(chalk.yellow(`  [*] Nodos Modificados: ${planningResult.architectureDelta.modifiedNodes.map((n: any) => n.id).join(', ')}`));
+        }
+        if (planningResult.architectureDelta.addedRelations.length > 0) {
+          console.log(chalk.green(`  [+] Relaciones Agregadas:`));
+          planningResult.architectureDelta.addedRelations.forEach((r: any) => {
+            console.log(`      ${r.from} ➔ ${r.to} (${r.type})`);
+          });
+        }
+        if (planningResult.architectureDelta.boundariesEntered.length > 0) {
+          console.log(chalk.cyan(`  ➔ Capas de Límite Entradas: ${planningResult.architectureDelta.boundariesEntered.join(', ')}`));
+        }
+
+        console.log(chalk.bold('\n3. Secuencia de Ejecución (Orden de Grafo):'));
+        if (planningResult.summary.hasCycle) {
+          console.log(chalk.red.bold('  ⚠ No se puede determinar la secuencia de forma segura debido a ciclos de dependencias en el grafo.'));
+          console.log(chalk.red(`    Componentes en el ciclo: ${planningResult.changeGraph.cycleNodes.join(' ⇄ ')}`));
+        } else {
+          planningResult.executionPlan.steps.forEach((step: any) => {
+            let color = chalk.cyan;
+            if (step.action === 'CREATE') color = chalk.green;
+            else if (step.action === 'TEST') color = chalk.yellow;
+            else if (step.action === 'REVIEW') color = chalk.magenta;
+
+            console.log(`  Paso ${step.order}: ${color.bold(step.action)} sobre '${chalk.green(step.target)}'`);
+            console.log(`    Racional: ${step.rationale}`);
+            step.validation.forEach((val: string) => {
+              console.log(`      ✓ Validación: ${val}`);
+            });
+          });
+
+          if (planningResult.executionPlan.parallelGroups.length > 0) {
+            console.log(chalk.bold('\n  Grupos de Ejecución Paralela:'));
+            planningResult.executionPlan.parallelGroups.forEach((group: string[], index: number) => {
+              console.log(`    Grupo ${index + 1}: [${group.join(', ')}]`);
+            });
+          }
+        }
+
+        console.log(chalk.bold('\n4. Estrategia de Tests:'));
+        if (planningResult.testStrategy.mustRun.length > 0) {
+          console.log(chalk.red.bold('  Debe Ejecutar (Test Directo):'));
+          planningResult.testStrategy.mustRun.forEach((t: any) => console.log(`    ➔ ${chalk.red(t.testFile)} (para ${t.target}) - Prio ${t.priority}`));
+        }
+        if (planningResult.testStrategy.shouldRun.length > 0) {
+          console.log(chalk.yellow.bold('  Debería Ejecutar (Test Indirecto):'));
+          planningResult.testStrategy.shouldRun.forEach((t: any) => console.log(`    ➔ ${chalk.yellow(t.testFile)} (para ${t.target}) - Prio ${t.priority}`));
+        }
+        if (planningResult.testStrategy.recommendedToCreate.length > 0) {
+          console.log(chalk.green.bold('  Recomendado Crear:'));
+          planningResult.testStrategy.recommendedToCreate.forEach((t: any) => console.log(`    ➔ ${chalk.green(t.testFile)} (para ${t.target}) - Prio ${t.priority}`));
+        }
+
+        if (planningResult.architectureDelta.violationsIntroduced.length > 0) {
+          console.log(chalk.red.bold('\n5. Violaciones de Gobernanza Introducidas:'));
+          planningResult.architectureDelta.violationsIntroduced.forEach((v: string) => {
+            console.log(`  ⚠ ${chalk.red(v)}`);
+          });
+        }
+
+        if (planningResult.architectureDelta.affectedADRs.length > 0) {
+          console.log(chalk.bold('\n6. ADRs Afectados:'));
+          planningResult.architectureDelta.affectedADRs.forEach((adr: string) => {
+            console.log(`  ➔ ${chalk.yellow(adr)}`);
+          });
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al generar el plan de cambio: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+// Comando: simulate
+program
+  .command('simulate')
+  .argument('[taskDescription]', 'Descripción de la tarea de desarrollo')
+  .description('Simula los efectos arquitectónicos de una tarea de desarrollo sin realizar modificaciones físicas')
+  .option('--file <filePath>', 'Analiza tomando un archivo como target explícito')
+  .option('--budget <tokens>', 'Establece el límite máximo de tokens para el contexto', '10000')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (taskDescription, options) => {
+    const projectDir = process.cwd();
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
+      const { PlanningEngine } = require('../core/planning/planning-engine');
+
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
+      }
+
+      if (!taskDescription && !options.file) {
+        console.error(chalk.red('Debe proporcionar una descripción de tarea o un archivo explícito con --file.'));
+        process.exit(1);
+      }
+
+      const task = taskDescription || `Plan para archivo ${options.file}`;
+      const budget = parseInt(options.budget, 10);
+      const reasoner = new ArchitecturalReasoner(model);
+      const plan = await reasoner.plan(task, {
+        explicitFiles: options.file ? [options.file] : [],
+        expandGraph: true,
+        budget
+      });
+
+      const planningEngine = new PlanningEngine(model);
+      const planningResult = planningEngine.plan(plan);
+
+      if (options.json) {
+        console.log(JSON.stringify(planningResult, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\n================================================'));
+        console.log(chalk.blue.bold('       ASAF Architectural Change Simulation      '));
+        console.log(chalk.blue.bold('================================================\n'));
+        console.log(`Tarea:         ${chalk.bold(planningResult.changePlan.task)}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+
+        console.log(chalk.bold('\nBEFORE (Grafo Real Actual):'));
+        console.log(`  Archivos totales: ${model.files.length}`);
+        console.log(`  Relaciones totales: ${model.relations.length}`);
+
+        console.log(chalk.bold('\nPROJECTED (Simulado después de cambios):'));
+        console.log(`  Archivos totales: ${planningResult.summary.metrics.graphNodes}`);
+        console.log(`  Relaciones totales: ${planningResult.summary.metrics.graphEdges}`);
+
+        console.log(chalk.bold('\nDELTA DE CAMBIO:'));
+        if (planningResult.architectureDelta.addedNodes.length > 0) {
+          console.log(chalk.green(`  [+] Agregados: ${planningResult.architectureDelta.addedNodes.map((n: any) => n.id).join(', ')}`));
+        }
+        if (planningResult.architectureDelta.removedNodes.length > 0) {
+          console.log(chalk.red(`  [-] Eliminados: ${planningResult.architectureDelta.removedNodes.map((n: any) => n.id).join(', ')}`));
+        }
+        if (planningResult.architectureDelta.addedRelations.length > 0) {
+          console.log(chalk.green(`  [+] Nuevas Relaciones de Dependencia:`));
+          planningResult.architectureDelta.addedRelations.forEach((r: any) => {
+            console.log(`      ${r.from} ➔ ${r.to} (${r.type})`);
+          });
+        }
+
+        if (planningResult.architectureDelta.violationsIntroduced.length > 0) {
+          console.log(chalk.red.bold('\nVIOLACIONES INTRODUCIDAS:'));
+          planningResult.architectureDelta.violationsIntroduced.forEach((v: string) => {
+            console.log(`  ⚠ ${chalk.red(v)}`);
+          });
+        } else {
+          console.log(chalk.green('\n✓ No se introdujeron violaciones de arquitectura.'));
+        }
+
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al simular el cambio: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
 // Comando: context
 program
   .command('context [taskDescription]')
@@ -1490,7 +1797,7 @@ program
       const budget = parseInt(options.budget, 10);
       const files = options.file ? [options.file] : [];
       const engine = new UnifiedContextEngine(model);
-      
+
       const context = await engine.buildContext({
         task: taskDescription,
         files,
@@ -1507,7 +1814,7 @@ program
         console.log(`Seleccionado:        ${context.budget.selected} tokens (Ahorro significativo)`);
         console.log(`Archivos del Target: ${context.target.files.join(', ') || 'Ninguno (Git limpio)'}`);
         console.log(chalk.gray('────────────────────────────────────────'));
-        
+
         if (context.codeSlices.length > 0) {
           console.log(chalk.bold('\nEstructura de Código Relevante (Slices):'));
           context.codeSlices.forEach((slice: any) => {
@@ -1545,17 +1852,169 @@ program
     }
   });
 
-// Comando: mcp
+// Comando: execute
 program
-  .command('mcp')
-  .description('Inicia el servidor Model Context Protocol (MCP) nativo de ASAF sobre stdio')
-  .action(() => {
-    try {
-      console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
-      require('../mcp/index');
-    } catch (error: any) {
-      console.error(chalk.red(`Error al iniciar el servidor MCP: ${error.message}`));
-    }
-  });
+        .command('execute <taskDescription>')
+        .description('Ejecuta físicamente un plan de cambio arquitectónico (v0.3.0 Safe Physical Execution)')
+        .option('--no-dry-run', 'Ejecuta físicamente la modificación en disco (por defecto es DRY-RUN)', true)
+        .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+        .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+        .action(async (taskDescription, options) => {
+          const projectDir = path.resolve(options.dir);
+          try {
+            const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+            const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
+            const { PlanningEngine } = require('../core/planning/planning-engine');
+            const { ChangeExecutor } = require('../core/execution/change-executor');
 
-program.parse(process.argv);
+            const store = new FileProjectIndexStore(projectDir);
+            const model = await store.load();
+            if (!model) {
+              console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+              process.exit(1);
+            }
+
+            const reasoner = new ArchitecturalReasoner(model);
+            const plan = await reasoner.plan(taskDescription, {
+              expandGraph: true
+            });
+
+            const planningEngine = new PlanningEngine(model);
+            const planningResult = planningEngine.plan(plan);
+
+            const patches = planningResult.executionPlan.steps
+              .filter((step: any) => ['CREATE', 'MODIFY', 'DELETE'].includes(step.action))
+              .map((step: any) => ({
+                filePath: step.target,
+                action: step.action as any,
+                expectedHashBefore: undefined,
+                content: step.action === 'DELETE' ? undefined : `// ASAF MODIFIED: ${step.rationale}\n`
+              }));
+
+            const executor = new ChangeExecutor(projectDir);
+            const isDryRun = options.dryRun !== false;
+
+            if (options.json) {
+              const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
+              console.log(JSON.stringify(session, null, 2));
+            } else {
+              console.log(chalk.blue.bold('\nASAF SAFE PHYSICAL EXECUTION'));
+              console.log(chalk.gray('────────────────────────────────'));
+              console.log(`Mode:    ${isDryRun ? chalk.yellow('DRY-RUN') : chalk.red('PHYSICAL EXECUTION')}`);
+              console.log(`Risk:    ${chalk.bold(planningResult.summary.riskLevel)} (Score: ${planningResult.summary.riskScore})`);
+              console.log(`Policy:  ${planningResult.summary.riskLevel}`);
+              console.log();
+              console.log(chalk.bold('Files to process:'));
+
+              patches.forEach((p: any) => {
+                const color = p.action === 'CREATE' ? chalk.green : p.action === 'MODIFY' ? chalk.yellow : chalk.red;
+                console.log(`  ${color(p.action)}  ${p.filePath}`);
+              });
+
+              console.log();
+              console.log(chalk.bold('Execution order:'));
+              planningResult.executionPlan.steps.forEach((step: any, idx: number) => {
+                console.log(`  ${idx + 1}. ${step.target} (${step.action})`);
+              });
+
+              console.log();
+
+              const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
+
+              console.log(chalk.bold('Execution Status:'));
+              console.log(`  Session ID: ${chalk.cyan(session.sessionId)}`);
+              console.log(`  Status:     ${session.status === 'COMMITTED' ? chalk.green('COMMITTED') : chalk.red(session.status)}`);
+              console.log(`  Rollback:   ${session.rollbackAvailable ? chalk.green('Available') : chalk.yellow('None')}`);
+
+              if (session.validation) {
+                console.log();
+                console.log(chalk.bold('Validation results:'));
+                console.log(`  ✓ Scope:      ${session.validation.checks.scope ? chalk.green('Passed') : chalk.red('Failed')}`);
+                console.log(`  ✓ TypeScript: ${session.validation.checks.build ? chalk.green('Passed') : chalk.red('Failed')}`);
+                console.log(`  ✓ Unit Tests: ${session.validation.checks.tests ? chalk.green('Passed') : chalk.red('Failed')}`);
+                console.log(`  ✓ Governance: ${session.validation.checks.governance ? chalk.green('Passed') : chalk.red('Failed')}`);
+                console.log(`  ✓ ADRs:       ${session.validation.checks.adr ? chalk.green('Passed') : chalk.red('Failed')}`);
+              }
+
+              console.log();
+              console.log(chalk.green('✓ Operación completada.'));
+            }
+          } catch (e: any) {
+            console.error(chalk.red(`\nError en la ejecución física: ${e.message}`));
+            process.exit(1);
+          }
+        });
+
+      // Comando: verify
+      program
+        .command('verify <sessionId>')
+        .description('Verifica post-cambios o corre validaciones sobre una sesión de ejecución física existente')
+        .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+        .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+        .action(async (sessionId, options) => {
+          const projectDir = path.resolve(options.dir);
+          try {
+            const { ExecutionSessionManager } = require('../core/execution/execution-session');
+            const { ValidationEngine } = require('../core/execution/validation-engine');
+
+            const sessionManager = new ExecutionSessionManager(projectDir);
+            const session = sessionManager.loadSession(sessionId);
+            if (!session) {
+              console.error(chalk.red(`Error: Sesión '${sessionId}' no encontrada.`));
+              process.exit(1);
+            }
+
+            const validationEngine = new ValidationEngine(projectDir);
+
+            const beforeHashes: Record<string, string> = {};
+            session.journal.forEach((entry: any) => {
+              if (entry.hashBefore) beforeHashes[entry.path] = entry.hashBefore;
+            });
+
+            const result = await validationEngine.validate({
+              sessionId,
+              before: { hashes: beforeHashes, violations: [] },
+              expectedChanges: session.journal.map((j: any) => j.path)
+            });
+
+            if (options.json) {
+              console.log(JSON.stringify(result, null, 2));
+            } else {
+              console.log(chalk.blue.bold(`\nASAF Verification Report - Session: ${sessionId}\n`));
+              console.log(`Status de Validación: ${result.passed ? chalk.green('PASSED') : chalk.red('FAILED')}`);
+              console.log(chalk.gray('────────────────────────────────────────'));
+              console.log(`  ✓ Compilación (Build):  ${result.checks.build ? chalk.green('Pass') : chalk.red('Fail')}`);
+              console.log(`  ✓ Pruebas (Tests):      ${result.checks.tests ? chalk.green('Pass') : chalk.red('Fail')}`);
+              console.log(`  ✓ Gobernanza (DDD):     ${result.checks.governance ? chalk.green('Pass') : chalk.red('Fail')}`);
+              console.log(`  ✓ ADRs:                 ${result.checks.adr ? chalk.green('Pass') : chalk.red('Fail')}`);
+              console.log(`  ✓ Scope de Archivos:    ${result.checks.scope ? chalk.green('Pass') : chalk.red('Fail')}`);
+
+              if (result.errors.length > 0) {
+                console.log(chalk.red.bold('\nErrores Detectados:'));
+                result.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
+              }
+              console.log();
+            }
+          } catch (e: any) {
+            console.error(chalk.red(`Error al verificar la sesión: ${e.message}`));
+            process.exit(1);
+          }
+        });
+
+      // Comando: mcp
+      program
+        .command('mcp')
+        .description('Inicia el servidor Model Context Protocol (MCP) nativo de ASAF sobre stdio')
+        .action(() => {
+          try {
+            console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
+            require('../mcp/index');
+          } catch (error: any) {
+            console.error(chalk.red(`Error al iniciar el servidor MCP: ${error.message}`));
+          }
+        });
+
+      if (process.env.NODE_ENV !== 'test') {
+        program.parse(process.argv);
+      }
+      export default program;
