@@ -1,1 +1,7 @@
 node_modules/
+dist/
+.asaf/
+showcase-dist/
+asaf-graph.json
+asaf-knowledge-graph.json
+asaf-semantic-graph.json
