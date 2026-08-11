@@ -18,6 +18,9 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **Task & Impact Intelligence:** Evalúa tareas en lenguaje natural (`asaf task`) mapeando archivos impactados, dependencias en cascada y estimando el riesgo y presupuesto de tokens (`Context Budget`).
 * **ADR Intelligence Engine (v0.2.6):** Los ADRs dejan de ser documentación pasiva y se convierten en entidades semánticas del grafo. ASAF indexa, traza y audita automáticamente la consistencia entre decisiones de arquitectura y el código fuente real, detectando ciclos y relaciones rotas de forma determinista.
 * **Context Intelligence Engine (v0.2.7):** Motor unificado que clasifica, recorta y empaqueta de forma óptima el contexto mínimo necesario para los modelos de IA. Incluye slicing AST de cuatro niveles (`FULL`, `STRUCTURAL`, `SIGNATURE`, `MINIMAL`, `EXCLUDE`), ranking explicable por distancia BFS del grafo, y un planificador de presupuesto de tokens sobre el objeto `AIContext` serializado completo.
+* **Architectural Reasoning (v0.2.8):** Motor de inferencia y razonamiento que deduce la intención técnica (CREATE, MODIFY, DELETE), conceptos clave y objetivos conceptuales a partir de solicitudes en lenguaje natural.
+* **Change Simulation & Planning (v0.2.9):** Simulación de deltas e impacto arquitectónico antes de realizar escrituras físicas, generando un plan de ejecución secuencial y estimando la probabilidad de riesgos.
+* **Safe Physical Execution (v0.3.0):** Escritura física transaccional y atómica en disco con exclusión mutua de archivos (Locks), validaciones automáticas post-cambio (Build, Tests Jest, linter DDD de gobernanza y control de alcance) y Rollback automático LIFO verificado byte-for-byte con hashes SHA-256.
 * **Quality & Security SAST Integrations:** Orquesta herramientas de análisis estático externas de seguridad y linter líderes (como `ESLint` para JS/TS y `Bandit` para Python), consolidando los hallazgos en un reporte ejecutivo.
 * **Deterministic AST Indexer & Incremental Updates:** Motor de indexación quirúrgica incremental basado en hashes SHA-256 y Git change tracking que analiza el AST nativo del repositorio sin expresiones regulares ni dependencia de LLMs, poblando el `ProjectModel` de manera rápida e idempotente.
 * **Graph Core & Semantic Query Engine:** Motor relacional matemático que expone dependencias e importaciones transitivas a nivel File y Symbol, calcula caminos más cortos (`shortest path`), detecta dependencias circulares complejas (mediante Strongly Connected Components - Tarjan) y computa métricas de acoplamiento (Fan-in / Fan-out).
@@ -146,6 +149,22 @@ npx asaf adr check [--json]
 npx asaf adr impact <adrId> [--json]
 ```
 
+### 12. `asaf execute "<task>"`
+Genera un plan de cambio arquitectónico y lo ejecuta de forma segura en el disco del proyecto. Por defecto corre en modo `DRY-RUN` (simulado). Pasa la bandera `--no-dry-run` para aplicar físicamente los cambios.
+```bash
+# Simular ejecución de tarea (DRY-RUN)
+npx asaf execute "Refactorizar core/execution/types.ts"
+
+# Ejecutar físicamente en disco con validaciones y rollback automático
+npx asaf execute "Refactorizar core/execution/types.ts" --no-dry-run
+```
+
+### 13. `asaf verify <sessionId>`
+Corre la suite completa de verificación post-cambio (compilación TypeScript, pruebas unitarias relacionadas, consistencia de ADRs, gobernanza de capas DDD y alcance de archivos) sobre una sesión de ejecución existente.
+```bash
+npx asaf verify exec_1786464936737_s2no7
+```
+
 ---
 
 ## 🔌 Herramientas MCP Disponibles
@@ -159,6 +178,9 @@ npx asaf adr impact <adrId> [--json]
 | `asaf_get_graph_metrics` | Expone métricas de acoplamiento, Fan-in/out y SCC del grafo. |
 | `asaf_check_adrs` | Valida la consistencia de los ADRs indexados detectando relaciones rotas y ciclos. |
 | `asaf_get_adr_impact` | Traza qué archivos están gobernados por un ADR a través del grafo determinista. |
+| `asaf_execute_change` | Ejecuta un plan de cambio en modo dry-run o físico en disco. Retorna los detalles de la sesión. |
+| `asaf_validate_change` | Corre las validaciones de compilación, tests y gobernanza post-cambio en una sesión. |
+| `asaf_rollback_change` | Revierte atómicamente a nivel físico el disco al estado inicial pre-cambio usando copias de seguridad. |
 
 ---
 
@@ -184,6 +206,9 @@ npx asaf adr impact <adrId> [--json]
 | `v0.2.5` | Specs Engine |
 | `v0.2.6` | **ADR Intelligence Engine** — ADRs como entidades semánticas del grafo |
 | `v0.2.7` | **Context Intelligence Engine** — CodeSlicer AST, ranking BFS explicable, planificador de budget serializado |
+| `v0.2.8` | **Architectural Reasoning** — Inferencia de intenciones técnicas y objetivos conceptuales |
+| `v0.2.9` | **Change Simulation & Planning** — Simulación de deltas arquitectónicos, estimación de impacto relacional y secuenciación de planes de ejecución |
+| `v0.3.0` | **Safe Physical Execution** — Escritura física en disco transaccional, Locks, validaciones y rollback atómico verificado por SHA-256 (Release Candidate) |
 
 ---
 
