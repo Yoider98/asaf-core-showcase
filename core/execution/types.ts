@@ -21,7 +21,10 @@ export type ExecutionSessionStatus =
   | 'EXECUTING'
   | 'VALIDATING'
   | 'COMMITTED'
-  | 'ROLLED_BACK';
+  | 'ROLLED_BACK'
+  | 'RECOVERING'
+  | 'RESUMABLE'
+  | 'FAILED_RECOVERY';
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 

@@ -2,25 +2,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { FileOperation } from './file-operation';
 import { LockManager } from './lock-manager';
+import { SessionStore } from './session-store';
 import { ExecutionSession, ExecutionSessionStatus, RiskLevel } from './types';
 
 export class ExecutionSessionManager {
   private projectRoot: string;
   private fileOp: FileOperation;
   private lockManager: LockManager;
-  private sessionsDir: string;
+  private sessionStore: SessionStore;
   private sessionTimeoutMs = 15 * 60 * 1000; // 15 minutos
 
-  constructor(projectRoot: string)  { /* Constructor del motor ASAF */ });
-    }
-  }
-
-  private getSessionFilePath(sessionId: string): string  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }.json`);
-  }
+  constructor(projectRoot: string)  { /* Constructor del motor ASAF */ }
 
   public createSession(riskLevel: RiskLevel, riskScore: number, dryRun: boolean): ExecutionSession  {
     // La implementación de análisis semántico avanzado de este módulo
@@ -54,12 +46,7 @@ export class ExecutionSessionManager {
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 
-      return session;
-    } catch (e)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
+    return session;
   }
 
   public saveSession(session: ExecutionSession): void  {
@@ -80,13 +67,19 @@ export class ExecutionSessionManager {
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
-          }
-        } catch (e)  {
+      }
+    }
+  }
+
+  public assertValidTransition(from: ExecutionSessionStatus, to: ExecutionSessionStatus): void  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
-      }
+  };
+
+    const allowed = validTransitions[from] || [];
+    if (!allowed.includes(to)) {
+      throw new Error(`State Machine Safety Violation: Cannot transition session status from '${from}' to '${to}'`);
     }
   }
 }

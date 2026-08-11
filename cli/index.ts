@@ -2014,6 +2014,125 @@ program
           }
         });
 
+      // Comando: recovery (ASAF v0.3.1)
+      const recoveryCmd = program
+        .command('recovery')
+        .description('Grupo de comandos para auditoría y recuperación de sesiones de ejecución física huérfanas');
+
+      recoveryCmd
+        .command('list')
+        .description('Lista todas las sesiones huérfanas, activas e incompletas detectadas en el workspace')
+        .action(() => {
+          try {
+            const { RecoveryEngine } = require('../core/execution/recovery-engine');
+            const engine = new RecoveryEngine(process.cwd());
+            const orphans = engine.detectOrphans();
+
+            if (orphans.length === 0) {
+              console.log(chalk.green('✓ No se detectaron sesiones huérfanas activas en el workspace. El estado es consistente.'));
+            } else {
+              console.log(chalk.red.bold(`\nSe detectaron ${orphans.length} sesiones huérfanas activas:\n`));
+              orphans.forEach((o: any) => {
+                console.log(`  ➔ Sesión ID: ${chalk.cyan(o.sessionId)} [Estado: ${chalk.yellow(o.status)}] (Creada: ${o.createdAt})`);
+              });
+              console.log(chalk.gray('\nUsa "asaf recovery inspect <sessionId>" para auditar el estado y restaurar.'));
+            }
+          } catch (e: any) {
+            console.error(chalk.red(`Error al listar sesiones: ${e.message}`));
+          }
+        });
+
+      recoveryCmd
+        .command('inspect <sessionId>')
+        .description('Audita la integridad de un snapshot, diario y workspace de una sesión huérfana')
+        .action((sessionId) => {
+          try {
+            const { RecoveryEngine } = require('../core/execution/recovery-engine');
+            const engine = new RecoveryEngine(process.cwd());
+            const report = engine.inspectSession(sessionId);
+
+            console.log(chalk.blue.bold(`\nReporte de Recuperación — Sesión: ${sessionId}\n`));
+            console.log(`  Estrategia Sugerida: ${chalk.bold(report.decision)}`);
+            console.log(`  Estado de Sesión:    ${report.status}`);
+            console.log(`  ✓ Snapshot Válido:   ${report.snapshotIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+            console.log(`  ✓ Diario Válido:     ${report.journalIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+            console.log(`  ✓ Disco Consistente: ${report.workspaceIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+            console.log();
+            console.log(`  Pasos Aplicados:     ${report.appliedSteps.join(', ') || 'Ninguno'}`);
+            console.log(`  Pasos Pendientes:    ${report.pendingSteps.join(', ') || 'Ninguno'}`);
+            
+            if (report.errors.length > 0) {
+              console.log(chalk.red.bold('\nConflictos/Inconsistencias Detectadas:'));
+              report.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
+            }
+            console.log();
+          } catch (e: any) {
+            console.error(chalk.red(`Error al inspeccionar la sesión: ${e.message}`));
+          }
+        });
+
+      recoveryCmd
+        .command('rollback <sessionId>')
+        .description('Fuerza la reversión física atómica LIFO de todos los cambios de una sesión huérfana')
+        .action(async (sessionId) => {
+          try {
+            console.log(chalk.yellow(`\nIniciando rollback atómico para la sesión ${sessionId}...`));
+            const { RecoveryEngine } = require('../core/execution/recovery-engine');
+            const engine = new RecoveryEngine(process.cwd());
+            const report = await engine.rollbackOrphan(sessionId);
+
+            console.log(chalk.green(`\n✓ Rollback completado de forma exitosa.`));
+            console.log(`  Sesión ID: ${report.sessionId}`);
+            console.log(`  Estado:     ${report.status}`);
+            console.log(`  Archivos Revertidos: ${report.rolledBackSteps.join(', ') || 'Ninguno'}`);
+          } catch (e: any) {
+            console.error(chalk.red(`\nError crítico durante el rollback: ${e.message}`));
+          }
+        });
+
+      recoveryCmd
+        .command('resume <sessionId>')
+        .description('Reanuda la ejecución física de los pasos pendientes de una sesión huérfana de forma idempotente')
+        .action(async (sessionId) => {
+          try {
+            console.log(chalk.blue(`\nReanudando la ejecución de la sesión ${sessionId}...`));
+            const { RecoveryEngine } = require('../core/execution/recovery-engine');
+            const engine = new RecoveryEngine(process.cwd());
+            const report = await engine.resume(sessionId);
+
+            console.log(chalk.green(`\n✓ Sesión reanudada y procesada con éxito.`));
+            console.log(`  Estado Final: ${report.status}`);
+          } catch (e: any) {
+            console.error(chalk.red(`\nError crítico durante la reanudación: ${e.message}`));
+          }
+        });
+
+      recoveryCmd
+        .command('cleanup <sessionId>')
+        .description('Limpia y elimina los recursos y archivos temporales de una sesión terminal')
+        .action((sessionId) => {
+          try {
+            const { RecoveryEngine } = require('../core/execution/recovery-engine');
+            const engine = new RecoveryEngine(process.cwd());
+            engine.cleanup(sessionId);
+            console.log(chalk.green(`✓ Sesión '${sessionId}' limpiada y purgada del disco.`));
+          } catch (e: any) {
+            console.error(chalk.red(`Error al limpiar sesión: ${e.message}`));
+          }
+        });
+
+      if (process.env.NODE_ENV !== 'test') {
+        process.on('SIGINT', () => {
+          console.error(chalk.yellow('\n\n[ASAF] Interrupción del proceso detectada (SIGINT).'));
+          process.exit(130);
+        });
+
+        process.on('SIGTERM', () => {
+          console.error(chalk.yellow('\n[ASAF] Señal de terminación recibida (SIGTERM).'));
+          process.exit(143);
+        });
+      }
+
       if (process.env.NODE_ENV !== 'test') {
         program.parse(process.argv);
       }

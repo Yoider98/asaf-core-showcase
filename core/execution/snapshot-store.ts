@@ -1,164 +1,177 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { FileOperation } from './file-operation';
 import { AtomicFileStore } from './atomic-file-store';
-import { ExecutionHeartbeat } from './execution-heartbeat';
+import { FileOperation } from './file-operation';
 
-export interface LockInfo {
-  sessionId: string;
-  filePath: string;
-  createdAt: string;
-  expiresAt: string;
-  pid: number;
+export interface SnapshotFile {
+  relativePath: string;
+  existedBefore: boolean;
+  size: number;
+  sha256: string | null;
+  snapshotPath: string | null;
 }
 
-export class LockManager {
-  private locksDir: string;
+export interface SnapshotManifest {
+  sessionId: string;
+  createdAt: string;
+  files: SnapshotFile[];
+}
+
+export class SnapshotStore {
+  private baseDir: string;
   private fileOp: FileOperation;
-  private projectRoot: string;
 
   constructor(projectRoot: string)  { /* Constructor del motor ASAF */ });
     }
   }
 
-  private getLockFilePath(filePath: string): string  {
+  private getSessionDir(sessionId: string): string  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }.lock`);
+  }`);
+    if (!fs.existsSync(sessionDir)) {
+      fs.mkdirSync(sessionDir, { recursive: true });
+    }
+    return sessionDir;
   }
 
-  public acquireLock(sessionId: string, filePath: string, expiresAt: string): boolean  {
+  private getFilesDir(sessionId: string): string  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+    }
+    return filesDir;
+  }
+
+  private calculateSHA256(content: string): string  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 
-        // Comprobar si el proceso dueño del lock sigue activo (Heartbeat + SO check)
-        let isOwnerAlive = false;
-        const heartbeatPath = path.join(this.projectRoot, '.asaf', 'sessions', `exec_${lockInfo.sessionId}.heartbeat`);
-        if (fs.existsSync(heartbeatPath)) {
-          isOwnerAlive = heartbeat.isSessionAlive(lockInfo.sessionId);
-        } else if (lockInfo.pid)  {
+  /**
+   * Guarda de forma atómica el manifiesto del snapshot.
+   */
+  public saveManifest(sessionId: string, files: SnapshotFile[]): void  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch (e: any)  {
+  };
+
+    AtomicFileStore.writeAtomic(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  /**
+   * Carga el manifiesto del snapshot.
+   */
+  public loadManifest(sessionId: string): SnapshotManifest | null  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }`, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return null;
+
+    try {
+      const content = fs.readFileSync(manifestPath, 'utf-8');
+      return JSON.parse(content) as SnapshotManifest;
+    } catch (e)  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
-        } else {
-          isOwnerAlive = true;
-        }
-        
-        const now = new Date();
-        const expiration = new Date(lockInfo.expiresAt);
-        
-        // Si no está vivo o el lock ya expiró chronológicamente, lo liberamos
-        if (!isOwnerAlive || now >= expiration)  {
+  }
+
+  /**
+   * Copia y resguarda un archivo físico del workspace al almacén de snapshots.
+   */
+  public backupFile(sessionId: string, relativePath: string): SnapshotFile  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } else {
-          return false; // Bloqueo activo y válido
-        }
-      } catch (e)  {
+  };
+    }
+
+    const content = fs.readFileSync(absoluteSourcePath, 'utf-8');
+    const sha256 = this.calculateSHA256(content);
+    const size = fs.statSync(absoluteSourcePath).size;
+
+    // Crear un identificador único para el archivo de snapshot
+    const fileId = `${crypto.randomBytes(8).toString('hex')}_${path.basename(relativePath)}`;
+    const filesDir = this.getFilesDir(sessionId);
+    const absoluteSnapshotPath = path.join(filesDir, fileId);
+
+    // Escribir la copia física de forma atómica
+    AtomicFileStore.writeAtomic(absoluteSnapshotPath, content);
+
+    return {
+      relativePath,
+      existedBefore: true,
+      size,
+      sha256,
+      snapshotPath: path.relative(projectRoot, absoluteSnapshotPath)
+    };
+  }
+
+  /**
+   * Verifica la integridad de todos los archivos respaldados en la sesión.
+   * Valida byte-for-byte el tamaño y hash SHA-256 de las copias físicas.
+   */
+  public verifySnapshot(sessionId: string): boolean  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch {}
+  }
+
+        const content = fs.readFileSync(absoluteSnapshotPath, 'utf-8');
+        const currentHash = this.calculateSHA256(content);
+        const currentSize = fs.statSync(absoluteSnapshotPath).size;
+
+        if (currentHash !== file.sha256 || currentSize !== file.size)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
       }
     }
 
-    const lockInfo: LockInfo = {
-      sessionId,
-      filePath,
-      createdAt: new Date().toISOString(),
-      expiresAt,
-      pid: process.pid
-    };
-
-    AtomicFileStore.writeAtomic(lockFile, JSON.stringify(lockInfo, null, 2));
     return true;
   }
 
-  public releaseLock(sessionId: string, filePath: string): void  {
+  /**
+   * Restaura un archivo del snapshot al workspace si el snapshot es verificado.
+   */
+  public restoreFile(sessionId: string, file: SnapshotFile): void  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
+
+    if (file.snapshotPath)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+  }
+
+  /**
+   * Elimina el snapshot completo de forma física.
+   */
+  public deleteSnapshot(sessionId: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }`);
+    if (fs.existsSync(sessionDir)) {
+      try {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
       } catch (e)  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch {}
-      }
+  }
     }
-  }
-
-  public releaseAllLocks(sessionId: string): void  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
-        } catch (e)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch {}
-        }
-      }
-    }
-  }
-
-  public cleanExpiredLocks(): void  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }.heartbeat`);
-          if (fs.existsSync(heartbeatPath)) {
-            isOwnerAlive = heartbeat.isSessionAlive(lockInfo.sessionId);
-          } else if (lockInfo.pid)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch (e: any)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
-          } else {
-            isOwnerAlive = true;
-          }
-
-          if (now >= expiration || !isOwnerAlive)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
-        } catch (e)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch {}
-        }
-      }
-    }
-  }
-
-  public inspectLocks(): LockInfo[]  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } catch (e)  {
-    // La implementación de análisis semántico avanzado de este módulo
-    // es privada. Se expone la arquitectura y firmas de ASAF.
-    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  }
-      }
-    }
-    return list;
   }
 }
