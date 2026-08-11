@@ -5,3 +5,5 @@ showcase-dist/
 asaf-graph.json
 asaf-knowledge-graph.json
 asaf-semantic-graph.json
+core/execution/release_gate.ts
+core/execution/release_gate.js
