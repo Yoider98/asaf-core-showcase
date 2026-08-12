@@ -11,6 +11,7 @@
     "start": "node dist/cli/index.js",
     "dev": "ts-node cli/index.ts",
     "test": "jest",
+    "test:e2e": "jest tests/e2e/**/*.test.ts",
     "prepare": "tsc"
   },
   "keywords": [
