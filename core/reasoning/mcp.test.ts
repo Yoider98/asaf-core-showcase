@@ -263,4 +263,42 @@ describe('MCP Tools: change_plan y test_impact', () => {
     expect(strategy.mustRun).toBeDefined();
     expect(strategy.shouldRun).toBeDefined();
   });
+
+  test('12. Debería exponer y ejecutar la nueva herramienta de generación de propuesta asaf_generate_proposal', async () => {
+    const { AgentOrchestrator } = require('../../agents/orchestrator');
+    
+    // Mockear la llamada de orquestación de propuesta
+    const mockProposal = {
+      id: 'prop-mcp-123',
+      changePlanTask: 'refactor service',
+      contextHash: 'm-hash',
+      promptVersion: 'v0.4.0-mcp-test',
+      provider: 'ollama',
+      model: 'codegemma',
+      patches: [],
+      warnings: [],
+      createdAt: ''
+    };
+
+    jest.spyOn(AgentOrchestrator.prototype, 'orchestrateProposal').mockResolvedValue(mockProposal as any);
+
+    const server = getMcpServer();
+    const callHandler = server._requestHandlers.get('tools/call');
+
+    const result = await callHandler({
+      method: 'tools/call',
+      params: {
+        name: 'asaf_generate_proposal',
+        arguments: {
+          task: 'refactor service',
+          budget: 30000
+        }
+      }
+    });
+
+    expect(result.isError).toBeUndefined();
+    const proposal = JSON.parse(result.content[0].text);
+    expect(proposal.id).toBe('prop-mcp-123');
+    expect(proposal.changePlanTask).toBe('refactor service');
+  });
 });

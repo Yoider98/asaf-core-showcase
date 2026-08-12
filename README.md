@@ -27,6 +27,7 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **CLI Project Status & Technical Debt Dashboard:** Mapea la salud de tu repositorio en un Dashboard de consola visual (`asaf status`) con barras de progreso coloreadas, estado de Git y de la indexación incremental, y estimación de horas de Deuda Técnica.
 * **Agent Runtime & Multi-agent Orchestration:** Secuencia interactiva de agentes virtuales (Solution Architect, Backend, DBA, QA) con verificación post-ejecución para evitar regresiones de calidad en cada tarea (`asaf run`).
 * **Universal Agent Bridge (MCP Server):** Servidor native MCP (Model Context Protocol) sobre stdio para inyectar contexto y gobernanza directamente en asistentes de IA líderes como Cursor, Cline o Claude Code.
+* **Closed-Loop In-Memory Autocorrection (v0.4.0):** Genera propuestas estructuradas de parches con LLMs desacoplados, implementa una doble barrera de seguridad logic/physical (Normalización Windows/POSIX, escape de traversal Unicode, symlinks), simula en memoria los imports reales de TypeScript resolviéndolos contra el tsconfig y el lote actual de cambios (No-Touch Disk), y autocorrige secuencialmente con inyección de feedback estructurado (hasta 3 reintentos) de forma 100% lógica.
 
 ---
 
@@ -149,17 +150,34 @@ npx asaf adr check [--json]
 npx asaf adr impact <adrId> [--json]
 ```
 
-### 12. `asaf execute "<task>"`
-Genera un plan de cambio arquitectónico y lo ejecuta de forma segura en el disco del proyecto. Por defecto corre en modo `DRY-RUN` (simulado). Pasa la bandera `--no-dry-run` para aplicar físicamente los cambios.
+### 12. `asaf config llm`
+Configura y guarda los parámetros del proveedor de LLM en el archivo `asaf.json`:
+```bash
+npx asaf config llm --provider ollama --model codegemma --host http://localhost:11434 --timeout 60000
+```
+
+### 13. `asaf generate "<task>"`
+Orquesta la generación y validación de una propuesta estructurada mediante IA de forma 100% lógica y en memoria (No-Touch Disk). Ejecuta el bucle cerrado de verificación/autocorrección y guarda la propuesta en `.asaf/proposals/proposal-[id].json` calculando el hash pre-flights de los archivos.
+```bash
+npx asaf generate "Implementar autenticación JWT en controladores de usuarios" --budget 30000
+```
+
+### 14. `asaf execute "<task>"`
+Genera un plan de cambio arquitectónico y lo ejecuta de forma segura en el disco. Por defecto corre en modo `DRY-RUN` (simulado). Pasa la bandera `--no-dry-run` para aplicar físicamente.
+
+Admite el flag `--proposal <id>` para ejecutar directamente una propuesta de IA validada de forma transaccional, detectando automáticamente conflictos si el hash del disco no coincide con el guardado en la generación:
 ```bash
 # Simular ejecución de tarea (DRY-RUN)
 npx asaf execute "Refactorizar core/execution/types.ts"
 
 # Ejecutar físicamente en disco con validaciones y rollback automático
 npx asaf execute "Refactorizar core/execution/types.ts" --no-dry-run
+
+# Ejecutar físicamente una propuesta estructurada validada de la IA
+npx asaf execute --proposal prop-123 --no-dry-run
 ```
 
-### 13. `asaf verify <sessionId>`
+### 15. `asaf verify <sessionId>`
 Corre la suite completa de verificación post-cambio (compilación TypeScript, pruebas unitarias relacionadas, consistencia de ADRs, gobernanza de capas DDD y alcance de archivos) sobre una sesión de ejecución existente.
 ```bash
 npx asaf verify exec_1786464936737_s2no7
@@ -178,6 +196,7 @@ npx asaf verify exec_1786464936737_s2no7
 | `asaf_get_graph_metrics` | Expone métricas de acoplamiento, Fan-in/out y SCC del grafo. |
 | `asaf_check_adrs` | Valida la consistencia de los ADRs indexados detectando relaciones rotas y ciclos. |
 | `asaf_get_adr_impact` | Traza qué archivos están gobernados por un ADR a través del grafo determinista. |
+| `asaf_generate_proposal` | Orquesta en memoria (No-Touch Disk) la generación y validación de una propuesta estructurada mediante IA. |
 | `asaf_execute_change` | Ejecuta un plan de cambio en modo dry-run o físico en disco. Retorna los detalles de la sesión. |
 | `asaf_validate_change` | Corre las validaciones de compilación, tests y gobernanza post-cambio en una sesión. |
 | `asaf_rollback_change` | Revierte atómicamente a nivel físico el disco al estado inicial pre-cambio usando copias de seguridad. |
@@ -209,6 +228,8 @@ npx asaf verify exec_1786464936737_s2no7
 | `v0.2.8` | **Architectural Reasoning** — Inferencia de intenciones técnicas y objetivos conceptuales |
 | `v0.2.9` | **Change Simulation & Planning** — Simulación de deltas arquitectónicos, estimación de impacto relacional y secuenciación de planes de ejecución |
 | `v0.3.0` | **Safe Physical Execution** — Escritura física en disco transaccional, Locks, validaciones y rollback atómico verificado por SHA-256 (Release Candidate) |
+| `v0.3.1` | **Seguridad Operacional** — Detección estricta de TOCTOU, Journaling idempotente LIFO, Locks exclusivos por sesión y auto-recuperación de sesiones huérfanas |
+| `v0.4.0` | **Agente Autocorrector en Memoria** — Generación estructurada de parches con LLM, doble barrera lógica/física (LogicalSanitizer + PhysicalSafetyValidator), simulación in-memory de imports reales de TS (sin tocar disco), bucle cerrado de autocorrección lógica de 3 intentos e integración desacoplada en CLI/MCP |
 
 ---
 

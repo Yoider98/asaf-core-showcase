@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import * as crypto from 'crypto';
 
 const program = new Command();
 
@@ -1852,11 +1853,102 @@ program
     }
   });
 
+// Comando: config
+const configCmd = program
+  .command('config')
+  .description('Herramientas de configuración de ASAF');
+
+configCmd
+  .command('llm')
+  .description('Configura los parámetros del proveedor de LLM en el archivo asaf.json')
+  .option('-p, --provider <provider>', 'Proveedor de LLM (ej. ollama, openai)', 'ollama')
+  .option('-m, --model <model>', 'Modelo a utilizar (ej. codegemma, gpt-4)', 'codegemma')
+  .option('-h, --host <host>', 'Host endpoint del servicio', 'http://localhost:11434')
+  .option('-t, --timeout <number>', 'Timeout en milisegundos', '60000')
+  .action((options) => {
+    const projectDir = process.cwd();
+    const configPath = path.join(projectDir, 'asaf.json');
+    let config: any = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch (e) {}
+    }
+    config.llm = {
+      provider: options.provider,
+      model: options.model,
+      host: options.host,
+      timeoutMs: parseInt(options.timeout, 10)
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    console.log(chalk.green(`✓ Configuración de LLM guardada con éxito en asaf.json:`));
+    console.log(`  Provider: ${config.llm.provider}`);
+    console.log(`  Model:    ${config.llm.model}`);
+    console.log(`  Host:     ${config.llm.host}`);
+    console.log(`  Timeout:  ${config.llm.timeoutMs}ms`);
+  });
+
+// Comando: generate
+program
+  .command('generate <taskDescription>')
+  .description('Orquesta la generación y validación de una propuesta estructurada mediante IA en memoria (No-Touch Disk)')
+  .option('--budget <tokens>', 'Presupuesto de tokens', '30000')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (taskDescription, options) => {
+    const projectDir = path.resolve(options.dir);
+    try {
+      const { AgentOrchestrator } = require('../agents/orchestrator');
+      
+      // Obtener el grafo local actual de dependencias
+      let graph: any = null;
+      const graphPath = path.join(projectDir, 'asaf-graph.json');
+      if (fs.existsSync(graphPath)) {
+        graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+      } else {
+        const { DiscoveryEngine } = require('../discovery/index');
+        const discovery = new DiscoveryEngine(projectDir);
+        graph = discovery.analyze();
+      }
+
+      const orchestrator = new AgentOrchestrator(projectDir, graph);
+      const proposal = await orchestrator.orchestrateProposal(taskDescription, parseInt(options.budget, 10));
+
+      // Leer hashes físicos actuales del disco y rellenar expectedHashBefore de forma estricta para cada patch
+      for (const patch of proposal.patches) {
+        const fullPath = path.join(projectDir, patch.filePath);
+        if (fs.existsSync(fullPath) && !fs.statSync(fullPath).isDirectory()) {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          patch.expectedHashBefore = crypto.createHash('sha256').update(content).digest('hex');
+        } else {
+          patch.expectedHashBefore = null;
+        }
+      }
+
+      // Guardar la propuesta en .asaf/proposals/
+      const proposalDir = path.join(projectDir, '.asaf', 'proposals');
+      if (!fs.existsSync(proposalDir)) {
+        fs.mkdirSync(proposalDir, { recursive: true });
+      }
+
+      const proposalPath = path.join(proposalDir, `proposal-${proposal.id}.json`);
+      fs.writeFileSync(proposalPath, JSON.stringify(proposal, null, 2), 'utf-8');
+
+      console.log(chalk.green.bold(`✓ Propuesta de cambio validada y guardada exitosamente.`));
+      console.log(`  Ubicación: .asaf/proposals/proposal-${proposal.id}.json`);
+      console.log(`\nEjecute la propuesta físicamente de forma segura corriendo:`);
+      console.log(`  ${chalk.cyan(`asaf execute --proposal ${proposal.id} --no-dry-run`)}`);
+    } catch (e: any) {
+      console.error(chalk.red(`\nError en la generación de propuesta: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
 // Comando: execute
 program
-        .command('execute <taskDescription>')
-        .description('Ejecuta físicamente un plan de cambio arquitectónico (v0.3.0 Safe Physical Execution)')
+        .command('execute [taskDescription]')
+        .description('Ejecuta físicamente un plan de cambio arquitectónico o una propuesta de IA (v0.3.0 Safe Physical Execution)')
         .option('--no-dry-run', 'Ejecuta físicamente la modificación en disco (por defecto es DRY-RUN)', true)
+        .option('--proposal <id>', 'ID de la propuesta de IA validada a ejecutar físicamente')
         .option('-d, --dir <path>', 'Directorio del proyecto', '.')
         .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
         .action(async (taskDescription, options) => {
@@ -1874,22 +1966,49 @@ program
               process.exit(1);
             }
 
-            const reasoner = new ArchitecturalReasoner(model);
-            const plan = await reasoner.plan(taskDescription, {
-              expandGraph: true
-            });
+            let plan: any;
+            let patches: any[];
+
+            if (options.proposal) {
+              const proposalPath = path.join(projectDir, '.asaf', 'proposals', `proposal-${options.proposal}.json`);
+              if (!fs.existsSync(proposalPath)) {
+                console.error(chalk.red(`Error: No se encontró la propuesta '${options.proposal}' en .asaf/proposals/`));
+                process.exit(1);
+              }
+              const proposal = JSON.parse(fs.readFileSync(proposalPath, 'utf-8'));
+              
+              // Reconstruir ChangePlan a partir de la propuesta para alimentar el PlanningEngine
+              plan = proposal.changePlan || {
+                task: proposal.changePlanTask,
+                changes: proposal.patches.map((p: any) => ({
+                  path: p.filePath,
+                  action: p.action,
+                  reason: 'Propuesta de IA'
+                }))
+              };
+              patches = proposal.patches;
+            } else {
+              if (!taskDescription) {
+                console.error(chalk.red('Debe proporcionar un taskDescription o especificar --proposal <id>.'));
+                process.exit(1);
+              }
+              const reasoner = new ArchitecturalReasoner(model);
+              plan = await reasoner.plan(taskDescription, {
+                expandGraph: true
+              });
+
+              patches = plan.changes
+                .filter((step: any) => ['CREATE', 'MODIFY', 'DELETE'].includes(step.action))
+                .map((step: any) => ({
+                  filePath: step.path,
+                  action: step.action as any,
+                  expectedHashBefore: undefined,
+                  content: step.action === 'DELETE' ? undefined : `// ASAF MODIFIED: ${step.reason}\n`
+                }));
+            }
 
             const planningEngine = new PlanningEngine(model);
             const planningResult = planningEngine.plan(plan);
-
-            const patches = planningResult.executionPlan.steps
-              .filter((step: any) => ['CREATE', 'MODIFY', 'DELETE'].includes(step.action))
-              .map((step: any) => ({
-                filePath: step.target,
-                action: step.action as any,
-                expectedHashBefore: undefined,
-                content: step.action === 'DELETE' ? undefined : `// ASAF MODIFIED: ${step.rationale}\n`
-              }));
 
             const executor = new ChangeExecutor(projectDir);
             const isDryRun = options.dryRun !== false;
