@@ -6,3 +6,5 @@ asaf-graph.json
 asaf-knowledge-graph.json
 asaf-semantic-graph.json
 core/execution/release_gate*
+real_world_test_project/
+
