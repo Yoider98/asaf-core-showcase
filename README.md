@@ -28,7 +28,7 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **Agent Runtime & Multi-agent Orchestration:** Secuencia interactiva de agentes virtuales (Solution Architect, Backend, DBA, QA) con verificación post-ejecución para evitar regresiones de calidad en cada tarea (`asaf run`).
 * **Universal Agent Bridge (MCP Server):** Servidor native MCP (Model Context Protocol) sobre stdio para inyectar contexto y gobernanza directamente en asistentes de IA líderes como Cursor, Cline o Claude Code.
 * **Closed-Loop In-Memory Autocorrection (v0.4.0):** Genera propuestas estructuradas de parches con LLMs desacoplados, implementa una doble barrera de seguridad logic/physical (Normalización Windows/POSIX, escape de traversal Unicode, symlinks), simula en memoria los imports reales de TypeScript resolviéndolos contra el tsconfig y el lote actual de cambios (No-Touch Disk), y autocorrige secuencialmente con inyección de feedback estructurado (hasta 3 reintentos) de forma 100% lógica.
-* **ASAF Universal Cognitive Gateway (v0.4.x):** Capa cognitiva universal por encima de cualquier editor de código que procesa solicitudes estructuradas (`ASAFRequest` e `ASAFResponse`), determinando políticas inteligentes de delegación (`ASAF_FIRST`), invalidación segura de caché e instrumentación append-only detallando telemetría de `tokenEconomy`.
+* **ASAF Universal Cognitive Gateway (v0.4.x - Gate 11D):** Capa cognitiva universal por encima de cualquier editor de código que procesa solicitudes estructuradas (`ASAFRequest` e `ASAFResponse`), aplicando priorización de contexto inteligente determinista, autolimitación y degradación de slicing progresiva adaptativa (Budget Manager) y paginación en chunks (Context Chunker) de mayor prioridad recuperables mediante `asaf_context_next` para prevenir de raíz cualquier truncamiento de salida.
 
 ---
 
@@ -158,8 +158,8 @@ npx asaf gateway status
 # Diagnosticar la salud de transportes y motores del Gateway
 npx asaf gateway diagnose
 
-# Enviar una petición estructurada en caliente al Gateway
-npx asaf gateway request <intent> <task>
+# Enviar una petición estructurada en caliente al Gateway (admite flags opcionales de chunking)
+npx asaf gateway request <intent> [task] [--contextId <id>] [--chunk <index>]
 ```
 
 ### 17. `asaf integrations`
@@ -188,7 +188,8 @@ npx asaf doctor
 | `asaf_generate` | Genera una propuesta de parches en memoria (No-Touch Disk) mediante el VerificationLoop. |
 | `asaf_validate` | Valida de forma 100% side-effect free una propuesta estructurada ante reglas lógicas. |
 | `asaf_build_context` | Construye el `AIContext` optimizado para una tarea o conjunto de archivos con budget de tokens. |
-| `asaf_get_semantic_context` | Retorna dependencias, símbolos y tests relacionados de un nodo del grafo. |
+| `asaf_get_semantic_context` | Retorna dependencias, símbolos y tests relacionados de un nodo del grafo aplicando budget y priorización. |
+| `asaf_context_next` | Solicita el siguiente chunk de contexto parcial paginado por el Gateway. |
 | `asaf_analyze_task` | Analiza el impacto de una tarea en lenguaje natural sobre el grafo del proyecto. |
 | `asaf_check_governance` | Audita las violaciones de capas de arquitectura según las reglas de `asaf.json`. |
 | `asaf_get_graph_metrics` | Expone métricas de acoplamiento, Fan-in/out y SCC del grafo. |
@@ -237,7 +238,8 @@ ASAF opera como un proveedor de Project Intelligence agnóstico. El agente conve
 | `v0.3.0` | **Safe Physical Execution** — Escritura física en disco transaccional, Locks, validaciones y rollback atómico verificado por SHA-256 (Release Candidate) |
 | `v0.3.1` | **Seguridad Operacional** — Detección estricta de TOCTOU, Journaling idempotente LIFO, Locks exclusivos por sesión y auto-recuperación de sesiones huérfanas |
 | `v0.4.0` | **Agente Autocorrector en Memoria** — Generación estructurada de parches con LLM, doble barrera lógica/física (LogicalSanitizer + PhysicalSafetyValidator), simulación in-memory de imports reales de TS (sin tocar disco), bucle cerrado de autocorrección lógica de 3 intentos e integración desacoplada en CLI/MCP |
-| `v0.4.x` | **Universal Cognitive Gateway (Gate 11)** — Capa de control invertida cognitivamente mediante MCP y bridges universales (Antigravity/Cursor), políticas ASAF_FIRST, caché semántica con fingerprinting del proyecto y telemetría de tokenEconomy |
+| `v0.4.x` | **Universal Cognitive Gateway (Gate 11 & VS Code Bridge)** — Capa de control invertida cognitivamente mediante MCP y bridges universales (Antigravity/Cursor/VS Code), políticas ASAF_FIRST, caché semántica con fingerprinting del proyecto y telemetría de tokenEconomy |
+| `v0.4.x` | **Universal Context Budget & Anti-Truncation (Gate 11D)** — Gestión soberana del presupuesto de tokens (`ContextBudgetManager`), priorización inteligente determinista, degradación de slicing progresiva y paginación en chunks (`ContextChunker`) con la herramienta `asaf_context_next`. |
 
 ---
 

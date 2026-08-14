@@ -11,6 +11,9 @@ import { LLMProviderRouter } from '../generation/llm-router';
 import { ArchitecturalReasoner } from '../reasoning/architectural-reasoner';
 import { ProposalSimulationEngine } from '../planning/proposal-simulation-engine';
 import { ASAFGatewayActivityLogger } from './activity-logger';
+import { ContextPrioritizer, CodeSliceCandidate } from './context-prioritizer';
+import { ContextBudgetManager, ContextBudgetConfig } from './context-budget-manager';
+import { ContextChunker } from './context-chunker';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
@@ -19,8 +22,33 @@ export class ASAFGateway {
   private projectDir: string;
   private cache: ASAFContextCache;
   private activityLogger: ASAFGatewayActivityLogger;
+  private chunker: ContextChunker;
 
   constructor(projectDir: string = '.')  { /* Constructor del motor ASAF */ }
+
+  private loadBudgetConfig(): ContextBudgetConfig  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  };
+
+    if (fs.existsSync(configPath)) {
+      try {
+        const json = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (json.contextBudget)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  };
+        }
+      } catch (e)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+    }
+    return defaultConfig;
+  }
 
   public async handle(request: ASAFRequest): Promise<ASAFResponse>  {
     // La implementación de análisis semántico avanzado de este módulo
@@ -41,7 +69,7 @@ export class ASAFGateway {
       });
     }
 
-    // 2. Consultar caché para intenciones de lectura
+    // 2. Consultar caché para intenciones de lectura (excepto NEXT que es transitorio)
     if (['UNDERSTAND', 'ANALYZE', 'PLAN', 'IMPACT_ANALYSIS'].includes(intent)) {
       const cached = this.cache.get(intent, request.task);
       if (cached)  {
@@ -65,7 +93,10 @@ export class ASAFGateway {
       });
     }
 
+    const fingerprint = this.cache.getProjectFingerprint();
     const contextEngine = new UnifiedContextEngine(model);
+    const budgetConfig = this.loadBudgetConfig();
+
     const economy: ASAFTokenEconomy = {
       repositoryFiles: model.files.length,
       filesInspected: model.files.length,
@@ -75,9 +106,11 @@ export class ASAFGateway {
       estimatedFullContextTokens: model.files.length * 600,
       estimatedSelectedContextTokens: 0,
       estimatedTokensAvoided: 0,
+      budget: budgetConfig.maxTokens,
+      budgetUsed: 0,
       measurement: 'ESTIMATED',
       cacheHit: false,
-      projectFingerprint: this.cache.getProjectFingerprint(),
+      projectFingerprint: fingerprint,
     };
 
     const response: ASAFResponse = {
@@ -93,29 +126,127 @@ export class ASAFGateway {
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   };
+      } else if (intent === 'NEXT')  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+        response.status = sessionResult.hasMore ? 'PARTIAL' : 'SUCCESS';
+        response.summary = `Despachado chunk de contexto ${chunkIndex + 1}/${sessionResult.totalChunks} para ID: ${contextId}`;
+        response.contextId = contextId;
+        response.chunkIndex = chunkIndex;
+        response.totalChunks = sessionResult.totalChunks;
+        response.hasMore = sessionResult.hasMore;
+        response.context = {
+          files: sessionResult.chunk.map(s => s.filePath),
+          symbols: [],
+          dependencies: []
+        };
+        // Inyectar slices de código del chunk en la estructura de respuesta para que MCP los lea
+        (response as any).codeSlices = sessionResult.chunk.map(s => ({
+          filePath: s.filePath,
+          content: s.content,
+          level: s.level
+        }));
+
+        economy.totalFilesReturned = sessionResult.chunk.length;
+        economy.estimatedSelectedContextTokens = sessionResult.chunk.length * 800;
+        response.tokenEconomy = economy;
+        return logAndReturn(response);
+
       } else if (intent === 'UNDERSTAND' || intent === 'ANALYZE' || intent === 'PLAN')  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   });
 
-          response.summary = `Contexto compilado exitosamente para la intención: ${intent}`;
+          // 4. Mapear slices como candidatos para prioritizer
+          const candidates: CodeSliceCandidate[] = context.codeSlices.map(cs => ({
+            filePath: cs.filePath,
+            content: cs.content,
+            level: cs.level,
+            size: cs.content.length
+          }));
+
+          const dependenciesList = context.dependencies.dependencies.concat(context.dependencies.dependents);
+          const impactReport = await contextEngine.buildContext({ files: filesInput });
+          const impactFiles = impactReport.impact.items.map((i: any) => i.id);
+
+          const prioritized = ContextPrioritizer.prioritize(
+            candidates,
+            context.target.files,
+            dependenciesList,
+            impactFiles,
+            context.tests
+          );
+
+          // 5. Aplicar Budget adaptativo progresivo
+          const baseContextTemplate = {
+            task: request.task,
+            target: {
+              files: context.target.files,
+              symbols: context.target.symbols || []
+            },
+            architecture: {
+              violations: context.architecture.violations.map(v => `Violación en ${v.file}: importación prohibida de ${v.importedPath} bajo regla ${v.rule}`),
+              boundaries: context.architecture.boundariesCrossed
+            },
+            plan: context.evidence.map(e => e.claim)
+          };
+
+          const budgetResult = ContextBudgetManager.enforce(
+            prioritized,
+            budgetConfig,
+            this.projectDir,
+            baseContextTemplate
+          );
+
+          // 6. Aplicar Chunking si excede
+          const chunkResult = this.chunker.chunk(
+            budgetResult.slices,
+            budgetConfig,
+            fingerprint,
+            baseContextTemplate
+          );
+
+          response.status = chunkResult.hasMore ? 'PARTIAL' : 'SUCCESS';
+          response.summary = `Contexto compilado. Chunks de entrega: ${chunkResult.totalChunks}.`;
+          response.contextId = chunkResult.contextId;
+          response.chunkIndex = 0;
+          response.totalChunks = chunkResult.totalChunks;
+          response.hasMore = chunkResult.hasMore;
+
           response.context = {
-            files: context.target.files,
+            files: chunkResult.firstChunk.map(s => s.filePath),
             symbols: context.target.symbols || [],
-            dependencies: context.dependencies.dependencies.concat(context.dependencies.dependents)
+            dependencies: dependenciesList
           };
-          response.architecture = {
-            violations: context.architecture.violations.map(v => `Violación en ${v.file}: importación prohibida de ${v.importedPath} bajo regla ${v.rule}`),
-            boundaries: context.architecture.boundariesCrossed
-          };
-          response.plan = context.evidence.map(e => e.claim);
+          response.architecture = baseContextTemplate.architecture;
+          response.plan = baseContextTemplate.plan;
+
+          // Inyectar slices de código en el primer chunk de respuesta
+          (response as any).codeSlices = chunkResult.firstChunk.map(s => ({
+            filePath: s.filePath,
+            content: s.content,
+            level: s.level
+          }));
 
           economy.primaryFilesSelected = context.target.files.length;
-          economy.totalFilesReturned = context.codeSlices.length;
-          economy.supportingFilesReturned = Math.max(0, context.codeSlices.length - context.target.files.length);
-          economy.estimatedSelectedContextTokens = context.codeSlices.length * 800;
-          economy.estimatedTokensAvoided = Math.max(0, economy.estimatedFullContextTokens - economy.estimatedSelectedContextTokens);
+          economy.totalFilesReturned = chunkResult.firstChunk.length;
+          economy.supportingFilesReturned = Math.max(0, chunkResult.firstChunk.length - context.target.files.length);
+          economy.estimatedSelectedContextTokens = budgetResult.estimatedTokens;
+          economy.estimatedTokensAvoided = Math.max(0, economy.estimatedFullContextTokens - budgetResult.estimatedTokens);
+          economy.budgetUsed = budgetResult.budgetUsed;
+          economy.chunksCreated = chunkResult.totalChunks;
+          economy.slicingApplied = budgetResult.degradations.length > 0;
+          
+          const levelsMap: Record<string, string> = {};
+          budgetResult.slices.forEach(s => {
+            levelsMap[s.filePath] = s.level;
+          });
+          economy.slicingLevels = levelsMap;
+
         } catch (err: any)  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
@@ -225,8 +356,8 @@ export class ASAFGateway {
 
       response.tokenEconomy = economy;
       
-      // Cachear la respuesta si es lectura
-      if (['UNDERSTAND', 'ANALYZE', 'PLAN', 'IMPACT_ANALYSIS'].includes(intent)) {
+      // Cachear la respuesta si es lectura y no es parcial
+      if (response.status === 'SUCCESS' && ['UNDERSTAND', 'ANALYZE', 'PLAN', 'IMPACT_ANALYSIS'].includes(intent)) {
         this.cache.set(intent, request.task, response);
       }
 

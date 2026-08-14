@@ -6,13 +6,16 @@ export type ASAFIntent =
   | 'PLAN'
   | 'GENERATE'
   | 'VALIDATE'
-  | 'EXECUTE';
+  | 'EXECUTE'
+  | 'NEXT';
 
 export interface ASAFRequest {
   requestId: string;
   projectId: string;
   intent: ASAFIntent;
   task: string;
+  contextId?: string; // Opcional para solicitudes NEXT
+  chunkIndex?: number; // Opcional para solicitudes NEXT
   context?: {
     files?: string[];
     symbols?: string[];
@@ -41,6 +44,11 @@ export interface ASAFTokenEconomy {
   estimatedFullContextTokens: number;
   estimatedSelectedContextTokens: number;
   estimatedTokensAvoided: number;
+  budget?: number;
+  budgetUsed?: number;
+  slicingApplied?: boolean;
+  slicingLevels?: Record<string, string>;
+  chunksCreated?: number;
   measurement: 'ESTIMATED';
   cacheHit: boolean;
   projectFingerprint?: string;
@@ -52,6 +60,10 @@ export interface ASAFResponse {
   status: 'SUCCESS' | 'PARTIAL' | 'BLOCKED' | 'ERROR';
   intent: ASAFIntent;
   summary: string;
+  contextId?: string; // ID de sesión de chunking
+  chunkIndex?: number;
+  totalChunks?: number;
+  hasMore?: boolean;
   context?: {
     files: string[];
     symbols: string[];

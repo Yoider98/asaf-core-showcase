@@ -2881,9 +2881,28 @@ gatewayCmd
           console.log(`  Source:             ${lastIde.source}`);
           console.log(`  Client:             ${chalk.cyan(lastIde.client)}`);
           console.log(`  Intent:             ${lastIde.intent}`);
-          console.log(`  Status:             ${lastIde.status === 'SUCCESS' ? chalk.green(lastIde.status) : chalk.yellow(lastIde.status)}`);
+          console.log(`  Status:             ${lastIde.status === 'SUCCESS' ? chalk.green(lastIde.status) : lastIde.status === 'PARTIAL' ? chalk.cyan(lastIde.status) : chalk.yellow(lastIde.status)}`);
           console.log(`  Cache Hit:          ${lastIde.cacheHit ? chalk.green('Yes') : chalk.gray('No')}`);
           console.log(`  Project fingerprint: ${lastIde.projectFingerprint}`);
+
+          if (lastIde.tokenEconomy) {
+            const eco = lastIde.tokenEconomy;
+            console.log(chalk.blue.bold('\n  Context Economy:'));
+            console.log(`    Repository files:   ${eco.repositoryFiles}`);
+            console.log(`    Files inspected:    ${eco.filesInspected}`);
+            console.log(`    Primary files:      ${eco.primaryFilesSelected}`);
+            console.log(`    Supporting files:   ${eco.supportingFilesReturned}`);
+            console.log(`    Returned files:     ${eco.totalFilesReturned}`);
+            console.log(`    Original estimate:  ${eco.estimatedFullContextTokens} tokens`);
+            console.log(`    Selected context:   ${eco.estimatedSelectedContextTokens} tokens`);
+            console.log(`    Tokens avoided:     ${chalk.green(eco.estimatedTokensAvoided)}`);
+            console.log(`    Budget:             ${eco.budget || 15000}`);
+            console.log(`    Chunks created:     ${eco.chunksCreated || 1}`);
+            console.log(`    Slicing applied:    ${eco.slicingApplied ? chalk.green('Yes') : chalk.gray('No')}`);
+            if (eco.slicingLevels) {
+              console.log(`    Slicing levels:     ${JSON.stringify(eco.slicingLevels)}`);
+            }
+          }
         }
       }
       console.log();
@@ -2904,18 +2923,24 @@ gatewayCmd
   });
 
 gatewayCmd
-  .command('request <intent> <task>')
+  .command('request <intent> [task]')
   .description('Envía una solicitud estructurada ASAFRequest al Gateway')
-  .action(async (intent, task) => {
+  .option('--contextId <id>', 'ID de la sesión de contexto parcial')
+  .option('--chunk <index>', 'Índice del chunk a solicitar (0-indexed)')
+  .action(async (intent, task, options) => {
     try {
       const { ASAFGateway } = require('../core/gateway/gateway');
       const gateway = new ASAFGateway(process.cwd());
-      const res = await gateway.handle({
+      const req: any = {
         requestId: `req-${Math.random().toString(36).substring(2, 9)}`,
         projectId: 'default',
         intent: intent.toUpperCase(),
-        task
-      });
+        task: task || ''
+      };
+      if (options.contextId) req.contextId = options.contextId;
+      if (options.chunk) req.chunkIndex = parseInt(options.chunk, 10);
+      
+      const res = await gateway.handle(req);
       console.log(JSON.stringify(res, null, 2));
     } catch (e: any) {
       console.error(chalk.red(`Error en request: ${e.message}`));
