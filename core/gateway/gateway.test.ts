@@ -5,6 +5,7 @@ import { ASAFContextCache } from './context-cache';
 import { IDEBridgeRegistry } from './bridges/ide-bridge';
 import './bridges/antigravity-bridge';
 import './bridges/cursor-bridge';
+import './bridges/vscode-bridge';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -62,10 +63,15 @@ describe('ASAF Universal Cognitive Gateway Tests', () => {
     const bridges = IDEBridgeRegistry.getRegisteredBridges();
     expect(bridges).toContain('antigravity');
     expect(bridges).toContain('cursor');
+    expect(bridges).toContain('vscode');
 
     const cursor = IDEBridgeRegistry.createBridge('cursor');
     expect(cursor).toBeDefined();
     expect(cursor?.id).toBe('cursor');
+
+    const vscode = IDEBridgeRegistry.createBridge('vscode');
+    expect(vscode).toBeDefined();
+    expect(vscode?.id).toBe('vscode');
   });
 
   test('Fase 5: ASAFGateway bloquea si el indexador no ha corrido', async () => {

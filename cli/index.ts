@@ -2932,6 +2932,7 @@ program
     // Forzar importación
     require('../core/gateway/bridges/antigravity-bridge');
     require('../core/gateway/bridges/cursor-bridge');
+    require('../core/gateway/bridges/vscode-bridge');
     
     const bridges = IDEBridgeRegistry.getRegisteredBridges();
     for (const bId of bridges) {
@@ -2953,6 +2954,7 @@ program
       const { IDEBridgeRegistry } = require('../core/gateway/bridges/ide-bridge');
       require('../core/gateway/bridges/antigravity-bridge');
       require('../core/gateway/bridges/cursor-bridge');
+      require('../core/gateway/bridges/vscode-bridge');
 
       const bridge = IDEBridgeRegistry.createBridge(id);
       if (!bridge) {
