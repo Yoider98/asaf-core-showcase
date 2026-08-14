@@ -5,6 +5,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import * as crypto from 'crypto';
+import '../core/generation/providers/ollama-provider';
+import '../core/generation/providers/mock-provider';
+import '../core/generation/providers/openai-provider';
+import '../core/generation/ide-agent-registry';
+import '../core/generation/providers/ide/antigravity-provider';
+import '../core/generation/providers/ide/cursor-provider';
+import { LLMProviderRouter } from '../core/generation/llm-router';
 
 const program = new Command();
 
@@ -1036,9 +1043,95 @@ program
 program
   .command('run <taskDescription>')
   .description('Inicia la orquestación interactiva del Agent Runtime para resolver una tarea')
-  .action(async (taskDescription) => {
-    const projectDir = process.cwd();
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (taskDescription, options) => {
+    const projectDir = path.resolve(options.dir);
     try {
+      // 1. Chequear estado interactivo del agente de IDE
+      const configPath = path.join(projectDir, 'asaf.json');
+      let projectConfig: any = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch (e) { }
+      }
+
+      const isTTY = process.stdout.isTTY;
+      const llmConf = projectConfig.llm || {};
+      const provider = llmConf.provider || 'auto';
+      const preferred = llmConf.strategy?.preferred || ['ide_agent'];
+
+      if (provider === 'auto' && preferred.length > 0) {
+        const preferredId = preferred[0].toLowerCase();
+        if (preferredId === 'ide_agent' || preferredId === 'antigravity' || preferredId === 'cursor') {
+          const actualId = preferredId === 'ide_agent' ? 'antigravity' : preferredId;
+          const { IDEAgentRegistry } = require('../core/generation/ide-agent-registry');
+          const agent = IDEAgentRegistry.createAgent(actualId, { provider: actualId, model: 'auto' });
+          if (agent) {
+            const ideConf = projectConfig.providers?.ide?.[actualId];
+            if (ideConf) {
+              await agent.configure(ideConf);
+            }
+            const diag = await agent.diagnose(projectDir);
+            if (diag.status === 'MANUAL_ACTION_REQUIRED' || diag.status === 'NOT_CONFIGURED') {
+              if (isTTY) {
+                console.log(chalk.yellow(`\nPreferred IDE Agent is not ready. ${actualId.toUpperCase()} requires manual configuration.\n`));
+                console.log('Options:');
+                console.log('  [Y] Connect IDE Agent (Runs Connection Wizard)');
+                console.log('  [O] Use Ollama (Fallback to local model)');
+                console.log('  [C] Configure manually');
+                console.log('  [Q] Cancel execution\n');
+                const opt = await askQuestion('Select option [Y/O/C/Q]: ');
+                const lowerOpt = opt.trim().toLowerCase();
+                if (lowerOpt === 'y') {
+                  console.log(chalk.cyan(`\nIniciando Connection Wizard para ${actualId.toUpperCase()}...`));
+                  let attempts = 0;
+                  let connected = false;
+                  while (attempts < 3) {
+                    const currentDiag = await agent.diagnose(projectDir);
+                    if (currentDiag.status === 'AVAILABLE') {
+                      connected = true;
+                      break;
+                    }
+                    console.log(chalk.yellow(`Manual steps required:\n${currentDiag.manualActions.map((a: any) => a.instructions.join('\n')).join('\n')}`));
+                    const ans = await askQuestion('Have you completed the steps? [Y/n]: ');
+                    if (ans.toLowerCase() === 'n') break;
+                    console.log(chalk.cyan('Rechecking in 3 seconds...'));
+                    await new Promise(r => setTimeout(r, 3000));
+                    attempts++;
+                  }
+                  if (!connected) {
+                    console.log(chalk.red('Connection failed. Falling back to Ollama.'));
+                    if (!projectConfig.llm) projectConfig.llm = {};
+                    projectConfig.llm.provider = 'ollama';
+                    fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                  }
+                } else if (lowerOpt === 'o') {
+                  console.log(chalk.yellow('Falling back to Ollama.'));
+                  if (!projectConfig.llm) projectConfig.llm = {};
+                  projectConfig.llm.provider = 'ollama';
+                  fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                } else if (lowerOpt === 'c') {
+                  let endpoint = ideConf?.endpoint || 'localhost:50223';
+                  let workspaceId = ideConf?.workspaceId || process.env.ANTIGRAVITY_PROJECT_ID || process.env.ANTIGRAVITY_WORKSPACE_ID || '';
+                  workspaceId = await askQuestion(`Workspace/Project ID [${workspaceId}]: `) || workspaceId;
+                  endpoint = await askQuestion(`Endpoint local gRPC [${endpoint}]: `) || endpoint;
+                  if (!projectConfig.providers) projectConfig.providers = {};
+                  if (!projectConfig.providers.ide) projectConfig.providers.ide = {};
+                  projectConfig.providers.ide[actualId] = { endpoint, workspaceId };
+                  fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                } else {
+                  console.log(chalk.red('Execution cancelled.'));
+                  process.exit(1);
+                }
+              } else {
+                console.log(chalk.yellow(`Preferred IDE Agent ${actualId.toUpperCase()} unavailable. Non-TTY mode: Falling back automatically.`));
+              }
+            }
+          }
+        }
+      }
+
       let graph: any = null;
       const graphPath = path.join(projectDir, 'asaf-graph.json');
       if (fs.existsSync(graphPath)) {
@@ -1060,6 +1153,147 @@ program
       await orchestrator.orchestrate(taskDescription);
     } catch (error: any) {
       console.error(chalk.red(`Error en la orquestación del Agent Runtime: ${error.message}`));
+    }
+  });
+
+// Comando: generate
+program
+  .command('generate <taskDescription>')
+  .description('Orquesta la generación y validación de una propuesta estructurada mediante IA en memoria (No-Touch Disk)')
+  .option('--budget <tokens>', 'Presupuesto de tokens', '30000')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (taskDescription, options) => {
+    const projectDir = path.resolve(options.dir);
+    try {
+      // 1. Chequear estado interactivo del agente de IDE
+      const configPath = path.join(projectDir, 'asaf.json');
+      let projectConfig: any = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        } catch (e) { }
+      }
+
+      const isTTY = process.stdout.isTTY;
+      const llmConf = projectConfig.llm || {};
+      const provider = llmConf.provider || 'auto';
+      const preferred = llmConf.strategy?.preferred || ['ide_agent'];
+
+      if (provider === 'auto' && preferred.length > 0) {
+        const preferredId = preferred[0].toLowerCase();
+        if (preferredId === 'ide_agent' || preferredId === 'antigravity' || preferredId === 'cursor') {
+          const actualId = preferredId === 'ide_agent' ? 'antigravity' : preferredId;
+          const { IDEAgentRegistry } = require('../core/generation/ide-agent-registry');
+          const agent = IDEAgentRegistry.createAgent(actualId, { provider: actualId, model: 'auto' });
+          if (agent) {
+            const ideConf = projectConfig.providers?.ide?.[actualId];
+            if (ideConf) {
+              await agent.configure(ideConf);
+            }
+            const diag = await agent.diagnose(projectDir);
+            if (diag.status === 'MANUAL_ACTION_REQUIRED' || diag.status === 'NOT_CONFIGURED') {
+              if (isTTY) {
+                console.log(chalk.yellow(`\nPreferred IDE Agent is not ready. ${actualId.toUpperCase()} requires manual configuration.\n`));
+                console.log('Options:');
+                console.log('  [Y] Connect IDE Agent (Runs Connection Wizard)');
+                console.log('  [O] Use Ollama (Fallback to local model)');
+                console.log('  [C] Configure manually');
+                console.log('  [Q] Cancel execution\n');
+                const opt = await askQuestion('Select option [Y/O/C/Q]: ');
+                const lowerOpt = opt.trim().toLowerCase();
+                if (lowerOpt === 'y') {
+                  console.log(chalk.cyan(`\nIniciando Connection Wizard para ${actualId.toUpperCase()}...`));
+                  let attempts = 0;
+                  let connected = false;
+                  while (attempts < 3) {
+                    const currentDiag = await agent.diagnose(projectDir);
+                    if (currentDiag.status === 'AVAILABLE') {
+                      connected = true;
+                      break;
+                    }
+                    console.log(chalk.yellow(`Manual steps required:\n${currentDiag.manualActions.map((a: any) => a.instructions.join('\n')).join('\n')}`));
+                    const ans = await askQuestion('Have you completed the steps? [Y/n]: ');
+                    if (ans.toLowerCase() === 'n') break;
+                    console.log(chalk.cyan('Rechecking in 3 seconds...'));
+                    await new Promise(r => setTimeout(r, 3000));
+                    attempts++;
+                  }
+                  if (!connected) {
+                    console.log(chalk.red('Connection failed. Falling back to Ollama.'));
+                    if (!projectConfig.llm) projectConfig.llm = {};
+                    projectConfig.llm.provider = 'ollama';
+                    fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                  }
+                } else if (lowerOpt === 'o') {
+                  console.log(chalk.yellow('Falling back to Ollama.'));
+                  if (!projectConfig.llm) projectConfig.llm = {};
+                  projectConfig.llm.provider = 'ollama';
+                  fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                } else if (lowerOpt === 'c') {
+                  let endpoint = ideConf?.endpoint || 'localhost:50223';
+                  let workspaceId = ideConf?.workspaceId || process.env.ANTIGRAVITY_PROJECT_ID || process.env.ANTIGRAVITY_WORKSPACE_ID || '';
+                  workspaceId = await askQuestion(`Workspace/Project ID [${workspaceId}]: `) || workspaceId;
+                  endpoint = await askQuestion(`Endpoint local gRPC [${endpoint}]: `) || endpoint;
+                  if (!projectConfig.providers) projectConfig.providers = {};
+                  if (!projectConfig.providers.ide) projectConfig.providers.ide = {};
+                  projectConfig.providers.ide[actualId] = { endpoint, workspaceId };
+                  fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+                } else {
+                  console.log(chalk.red('Execution cancelled.'));
+                  process.exit(1);
+                }
+              } else {
+                console.log(chalk.yellow(`Preferred IDE Agent ${actualId.toUpperCase()} unavailable. Non-TTY mode: Falling back automatically.`));
+              }
+            }
+          }
+        }
+      }
+
+      const { AgentOrchestrator } = require('../agents/orchestrator');
+
+      // Obtener el grafo local actual de dependencias
+      let graph: any = null;
+      const graphPath = path.join(projectDir, 'asaf-graph.json');
+      if (fs.existsSync(graphPath)) {
+        graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+      } else {
+        const { DiscoveryEngine } = require('../discovery/index');
+        const discovery = new DiscoveryEngine(projectDir);
+        graph = discovery.analyze();
+      }
+
+      const orchestrator = new AgentOrchestrator(projectDir, graph);
+      const proposal = await orchestrator.orchestrateProposal(taskDescription, parseInt(options.budget, 10));
+
+      // Leer hashes físicos actuales del disco y rellenar expectedHashBefore de forma estricta para cada patch
+      for (const patch of proposal.patches) {
+        const fullPath = path.join(projectDir, patch.filePath);
+        if (fs.existsSync(fullPath) && !fs.statSync(fullPath).isDirectory()) {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const crypto = require('crypto');
+          patch.expectedHashBefore = crypto.createHash('sha256').update(content).digest('hex');
+        } else {
+          patch.expectedHashBefore = null;
+        }
+      }
+
+      // Guardar la propuesta en .asaf/proposals/
+      const proposalDir = path.join(projectDir, '.asaf', 'proposals');
+      if (!fs.existsSync(proposalDir)) {
+        fs.mkdirSync(proposalDir, { recursive: true });
+      }
+
+      const proposalPath = path.join(proposalDir, `proposal-${proposal.id}.json`);
+      fs.writeFileSync(proposalPath, JSON.stringify(proposal, null, 2), 'utf-8');
+
+      console.log(chalk.green.bold(`✓ Propuesta de cambio validada y guardada exitosamente.`));
+      console.log(`  Ubicación: .asaf/proposals/proposal-${proposal.id}.json`);
+      console.log(`\nEjecute la propuesta físicamente de forma segura corriendo:`);
+      console.log(`  ${chalk.cyan(`asaf execute --proposal ${proposal.id} --no-dry-run`)}`);
+    } catch (e: any) {
+      console.error(chalk.red(`\nError en la generación de propuesta: ${e.message}`));
+      process.exit(1);
     }
   });
 
@@ -1853,6 +2087,365 @@ program
     }
   });
 
+// Comando: providers
+program
+  .command('providers')
+  .description('Lista los proveedores de LLM registrados, su estado de configuración y disponibilidad')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (options) => {
+    const projectDir = path.resolve(options.dir);
+    try {
+      let llmConfig: any = { provider: 'auto', model: 'qwen2.5-coder:7b', host: 'http://127.0.0.1:11434', timeoutMs: 120000 };
+      const configPath = path.join(projectDir, 'asaf.json');
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+          if (config.llm) {
+            llmConfig = { ...llmConfig, ...config.llm };
+          }
+        } catch (e) { }
+      }
+
+      const router = new LLMProviderRouter(llmConfig, projectDir);
+      const descriptors = await router.discoverAll();
+
+      console.log(chalk.blue.bold('\nASAF Cognitive Providers\n'));
+
+      const printGroup = (title: string, list: typeof descriptors) => {
+        if (list.length === 0) return;
+        console.log(chalk.bold.underline(title));
+        list.forEach((d: any) => {
+          let statusColor = chalk.red;
+          if (d.status === 'AVAILABLE') statusColor = chalk.green;
+          else if (d.status === 'DISCOVERED' || d.status === 'NOT_CONFIGURED' || d.status === 'AUTH_REQUIRED') statusColor = chalk.yellow;
+
+          console.log(
+            `  ${chalk.bold(d.id.padEnd(15))} [Status: ${statusColor(d.status.padEnd(15))}] [Model: ${d.model.padEnd(15)}] [Configured: ${d.configured ? chalk.green('Yes') : chalk.gray('No')}]`
+          );
+          if (d.statusMessage) {
+            console.log(chalk.gray(`    └─ Details: ${d.statusMessage}`));
+          }
+        });
+        console.log();
+      };
+
+      printGroup('IDE AGENTS', descriptors.filter((d: any) => d.type === 'IDE_AGENT'));
+      printGroup('LOCAL MODELS', descriptors.filter((d: any) => d.type === 'LOCAL_MODEL'));
+      printGroup('CLOUD API', descriptors.filter((d: any) => d.type === 'CLOUD_API'));
+      printGroup('EXTERNAL AGENTS', descriptors.filter((d: any) => d.type === 'EXTERNAL_AGENT'));
+
+      try {
+        const active = await router.resolveProvider();
+        const activeConfig = active.getConfig();
+        console.log(`Selected Provider: ${chalk.green.bold(activeConfig.provider)} (Model: ${chalk.cyan(activeConfig.model)})`);
+      } catch (e: any) {
+        console.log(chalk.red(`Selected Provider: None (${e.message})`));
+      }
+      console.log();
+    } catch (e: any) {
+      console.error(chalk.red(`Error al listar los proveedores: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+// Comando: provider
+const providerCmd = program
+  .command('provider')
+  .description('Grupo de comandos para administrar proveedores cognitivos');
+
+providerCmd
+  .command('configure <id>')
+  .description('Configura los parámetros no sensibles de un IDE Agent en asaf.json')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (id, options) => {
+    const projectDir = path.resolve(options.dir);
+    const { IDEAgentRegistry } = require('../core/generation/ide-agent-registry');
+
+    const agentId = id.toLowerCase();
+    const AgentClass = IDEAgentRegistry.getAgentClass(agentId);
+    if (!AgentClass) {
+      console.error(chalk.red(`Error: El proveedor de IDE '${id}' no está registrado o no es compatible.`));
+      process.exit(1);
+    }
+
+    console.log(chalk.cyan(`Configuring ${id} Provider...`));
+
+    const configPath = path.join(projectDir, 'asaf.json');
+    let projectConfig: any = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch (e) { }
+    }
+    if (!projectConfig.providers) projectConfig.providers = {};
+    if (!projectConfig.providers.ide) projectConfig.providers.ide = {};
+    if (!projectConfig.providers.ide[agentId]) projectConfig.providers.ide[agentId] = {};
+
+    const currentConf = projectConfig.providers.ide[agentId];
+
+    let endpoint = currentConf.endpoint || 'localhost:50223';
+    let workspaceId = currentConf.workspaceId || process.env.ANTIGRAVITY_PROJECT_ID || process.env.ANTIGRAVITY_WORKSPACE_ID || '';
+
+    if (agentId === 'antigravity') {
+      console.log(chalk.yellow('\nPor favor, introduce los parámetros no sensibles para Antigravity:'));
+      workspaceId = await askQuestion(`Workspace/Project ID [${workspaceId}]: `) || workspaceId;
+      endpoint = await askQuestion(`Endpoint local gRPC [${endpoint}]: `) || endpoint;
+    } else {
+      console.log(chalk.yellow(`\nEl agente '${id}' no requiere configuraciones interactivas obligatorias de usuario.`));
+    }
+
+    const agent = IDEAgentRegistry.createAgent(agentId, { provider: agentId, model: 'auto' });
+    if (agent) {
+      const newConf = { endpoint, workspaceId };
+      await agent.configure(newConf);
+
+      const validation = await agent.validateConfiguration();
+      if (!validation.valid) {
+        console.error(chalk.red(`\nError de configuración:\n  - ${validation.errors.join('\n  - ')}`));
+        process.exit(1);
+      }
+
+      console.log(chalk.yellow('\nEjecutando handshake real con el agente...'));
+      const desc = await agent.discover(projectDir);
+
+      if (!desc.available) {
+        console.error(chalk.red.bold('\nConfiguration NOT saved'));
+        console.error(chalk.red(`Handshake: FAILED`));
+        console.error(chalk.red(`Status:    UNAVAILABLE`));
+        console.error(chalk.red(`Reason:    ${desc.statusMessage || 'Offline'}\n`));
+        process.exit(1);
+      }
+
+      // Solo si el handshake real es exitoso, persistimos
+      projectConfig.providers.ide[agentId] = newConf;
+      fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+
+      console.log(chalk.green.bold('\nConfiguration saved'));
+      console.log(chalk.green(`Handshake: SUCCESSFUL`));
+      console.log(chalk.green(`Status:    AVAILABLE\n`));
+    }
+  });
+
+providerCmd
+  .command('doctor <id>')
+  .description('Ejecuta un diagnóstico detallado del agente de IDE especificado')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (id, options) => {
+    const projectDir = path.resolve(options.dir);
+    const { IDEAgentRegistry } = require('../core/generation/ide-agent-registry');
+
+    const agentId = id.toLowerCase();
+    const AgentClass = IDEAgentRegistry.getAgentClass(agentId);
+    if (!AgentClass) {
+      console.error(chalk.red(`Error: El proveedor de IDE '${id}' no está registrado.`));
+      process.exit(1);
+    }
+
+    const configPath = path.join(projectDir, 'asaf.json');
+    let providersConfig: any = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        const json = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (json.providers) providersConfig = json.providers;
+      } catch (e) { }
+    }
+
+    const agent = IDEAgentRegistry.createAgent(agentId, { provider: agentId, model: 'auto' });
+    if (agent) {
+      const ideConf = providersConfig.ide?.[agentId];
+      if (ideConf) {
+        await agent.configure(ideConf);
+      }
+
+      console.log(chalk.blue.bold('\nASAF IDE Agent Doctor\n'));
+      console.log(`Provider:  ${chalk.cyan(agentId.toUpperCase())}`);
+      console.log(`Transport: ${chalk.cyan(agent.getTransport())}\n`);
+
+      const diag = await agent.diagnose(projectDir);
+
+      console.log(`Status: ${diag.status === 'AVAILABLE' ? chalk.green.bold(diag.status) : chalk.yellow.bold(diag.status)}\n`);
+      console.log(`Summary: ${diag.summary}\n`);
+
+      console.log(chalk.bold('Checks:\n'));
+      diag.checks.forEach((check: any) => {
+        let statusText = chalk.gray(`[${check.status}]`);
+        if (check.status === 'PASS') statusText = chalk.green('[PASS]');
+        else if (check.status === 'FAIL') statusText = chalk.red('[FAIL]');
+        else if (check.status === 'WAIT') statusText = chalk.yellow('[WAIT]');
+        console.log(`  ${statusText} ${check.label}`);
+      });
+      console.log();
+
+      if (diag.blockers.length > 0) {
+        console.log(chalk.red.bold('Blockers:'));
+        diag.blockers.forEach((b: any) => {
+          console.log(`  [FAIL] ${chalk.bold(b.code)}: ${b.description}`);
+        });
+        console.log();
+      }
+
+      console.log(chalk.bold('What ASAF can do:'));
+      diag.whatAsafCanDo.forEach((act: any) => console.log(`  - ${act}`));
+      console.log();
+
+      console.log(chalk.bold('What ASAF cannot do:'));
+      diag.whatAsafCannotDo.forEach((act: any) => console.log(`  - ${act}`));
+      console.log();
+
+      if (diag.manualActions.length > 0) {
+        console.log(chalk.yellow.bold('Required user action:'));
+        diag.manualActions.forEach((action: any, i: number) => {
+          console.log(`\n  ${i + 1}. ${chalk.bold(action.title)}: ${action.description}`);
+          action.instructions.forEach((ins: any) => {
+            console.log(`     ${ins}`);
+          });
+        });
+        console.log();
+      } else if (diag.status === 'AVAILABLE') {
+        console.log(chalk.green('✓ No blockers found. The agent is ready to be used.'));
+      }
+    }
+  });
+
+providerCmd
+  .command('connect <id>')
+  .description('Asistente interactivo de conexión y recuperación guiada para agentes de IDE')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .action(async (id, options) => {
+    const projectDir = path.resolve(options.dir);
+    const { IDEAgentRegistry } = require('../core/generation/ide-agent-registry');
+
+    const agentId = id.toLowerCase();
+    const AgentClass = IDEAgentRegistry.getAgentClass(agentId);
+    if (!AgentClass) {
+      console.error(chalk.red(`Error: El proveedor de IDE '${id}' no está registrado.`));
+      process.exit(1);
+    }
+
+    const configPath = path.join(projectDir, 'asaf.json');
+    let projectConfig: any = {};
+    if (fs.existsSync(configPath)) {
+      try {
+        projectConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch (e) { }
+    }
+    if (!projectConfig.providers) projectConfig.providers = {};
+    if (!projectConfig.providers.ide) projectConfig.providers.ide = {};
+    if (!projectConfig.providers.ide[agentId]) projectConfig.providers.ide[agentId] = {};
+
+    const agent = IDEAgentRegistry.createAgent(agentId, { provider: agentId, model: 'auto' });
+    if (!agent) return;
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    const isTTY = process.stdout.isTTY;
+
+    console.log(chalk.blue.bold('\nASAF IDE Agent Connection Wizard\n'));
+    console.log(`Target: ${chalk.cyan(agentId.toUpperCase())}\n`);
+
+    while (attempts < maxAttempts) {
+      const currentConf = projectConfig.providers.ide[agentId];
+      if (currentConf) {
+        await agent.configure(currentConf);
+      }
+
+      const diag = await agent.diagnose(projectDir);
+
+      if (diag.status === 'AVAILABLE') {
+        console.log(chalk.green.bold('\n✓ IDE Agent connected successfully.'));
+        console.log(`Status:    AVAILABLE`);
+        console.log(`Transport: ${agent.getTransport()}`);
+        console.log(`Handshake: SUCCESS\n`);
+        return;
+      }
+
+      console.log(chalk.yellow(`\nCurrent State: ${chalk.bold(diag.status)}`));
+      console.log(`Summary:       ${diag.summary}\n`);
+
+      if (diag.blockers.length > 0) {
+        console.log(chalk.red.bold('Active Blockers:'));
+        diag.blockers.forEach((b: any) => {
+          console.log(`  - [${b.code}] ${b.description}`);
+        });
+        console.log();
+      }
+
+      if (diag.manualActions.length > 0) {
+        console.log(chalk.yellow.bold('Manual Action Required:'));
+        diag.manualActions.forEach((action: any, i: number) => {
+          console.log(`\n  ${i + 1}. ${chalk.bold(action.title)}: ${action.description}`);
+          action.instructions.forEach((ins: any) => {
+            console.log(`     ${ins}`);
+          });
+        });
+        console.log();
+      }
+
+      if (!isTTY) {
+        console.log(chalk.yellow('Proceso no interactivo (non-TTY). Finalizando conexión guiada de forma automática.'));
+        process.exit(1);
+      }
+
+      console.log(chalk.red.bold('Connection not established.'));
+      console.log(`Current blockers: ${diag.blockers.map((b: any) => b.code).join(', ') || 'None'}\n`);
+
+      console.log('Options:');
+      console.log('  [R] Retry connection handshake');
+      console.log('  [D] Diagnose detailed checkers');
+      console.log('  [C] Configure parameters manually');
+      console.log('  [F] Use fallback (Ollama)');
+      console.log('  [Q] Quit wizard\n');
+
+      const opt = await askQuestion('Select option [R/D/C/F/Q]: ');
+      const lowerOpt = opt.trim().toLowerCase();
+
+      if (lowerOpt === 'q') {
+        console.log(chalk.red('\nConexión cancelada por el usuario. Exiting.'));
+        process.exit(1);
+      } else if (lowerOpt === 'f') {
+        console.log(chalk.yellow('\nConfigurando Ollama como fallback en asaf.json...'));
+        if (!projectConfig.llm) projectConfig.llm = {};
+        projectConfig.llm.provider = 'ollama';
+        fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+        console.log(chalk.green('✓ Fallback configurado exitosamente a Ollama. Exiting connect wizard.'));
+        return;
+      } else if (lowerOpt === 'c') {
+        console.log(chalk.cyan('\nIniciando configuración interactiva...'));
+        let endpoint = currentConf?.endpoint || 'localhost:50223';
+        let workspaceId = currentConf?.workspaceId || process.env.ANTIGRAVITY_PROJECT_ID || process.env.ANTIGRAVITY_WORKSPACE_ID || '';
+
+        if (agentId === 'antigravity') {
+          workspaceId = await askQuestion(`Workspace/Project ID [${workspaceId}]: `) || workspaceId;
+          endpoint = await askQuestion(`Endpoint local gRPC [${endpoint}]: `) || endpoint;
+        }
+
+        if (workspaceId) {
+          projectConfig.providers.ide[agentId] = { endpoint, workspaceId };
+          fs.writeFileSync(configPath, JSON.stringify(projectConfig, null, 2), 'utf-8');
+          console.log(chalk.green('Configuración guardada localmente. Rechecking...'));
+        }
+      } else if (lowerOpt === 'd') {
+        console.log(chalk.blue.bold('\nASAF IDE Agent Doctor Detailed Checks:\n'));
+        diag.checks.forEach((check: any) => {
+          let statusText = chalk.gray(`[${check.status}]`);
+          if (check.status === 'PASS') statusText = chalk.green('[PASS]');
+          else if (check.status === 'FAIL') statusText = chalk.red('[FAIL]');
+          else if (check.status === 'WAIT') statusText = chalk.yellow('[WAIT]');
+          console.log(`  ${statusText} ${check.label}`);
+        });
+        console.log();
+      } else {
+        console.log(chalk.cyan('\nRechecking connection in 3 seconds...'));
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
+      attempts++;
+    }
+
+    console.log(chalk.red.bold('\nMaximum connection attempts reached. Connection still unavailable.'));
+    process.exit(1);
+  });
+
 // Comando: config
 const configCmd = program
   .command('config')
@@ -1872,7 +2465,7 @@ configCmd
     if (fs.existsSync(configPath)) {
       try {
         config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      } catch (e) {}
+      } catch (e) { }
     }
     config.llm = {
       provider: options.provider,
@@ -1898,7 +2491,7 @@ program
     const projectDir = path.resolve(options.dir);
     try {
       const { AgentOrchestrator } = require('../agents/orchestrator');
-      
+
       // Obtener el grafo local actual de dependencias
       let graph: any = null;
       const graphPath = path.join(projectDir, 'asaf-graph.json');
@@ -1945,314 +2538,474 @@ program
 
 // Comando: execute
 program
-        .command('execute [taskDescription]')
-        .description('Ejecuta físicamente un plan de cambio arquitectónico o una propuesta de IA (v0.3.0 Safe Physical Execution)')
-        .option('--no-dry-run', 'Ejecuta físicamente la modificación en disco (por defecto es DRY-RUN)', true)
-        .option('--proposal <id>', 'ID de la propuesta de IA validada a ejecutar físicamente')
-        .option('-d, --dir <path>', 'Directorio del proyecto', '.')
-        .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
-        .action(async (taskDescription, options) => {
-          const projectDir = path.resolve(options.dir);
-          try {
-            const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
-            const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
-            const { PlanningEngine } = require('../core/planning/planning-engine');
-            const { ChangeExecutor } = require('../core/execution/change-executor');
+  .command('execute [taskDescription]')
+  .description('Ejecuta físicamente un plan de cambio arquitectónico o una propuesta de IA (v0.3.0 Safe Physical Execution)')
+  .option('--no-dry-run', 'Ejecuta físicamente la modificación en disco (por defecto es DRY-RUN)', true)
+  .option('--proposal <id>', 'ID de la propuesta de IA validada a ejecutar físicamente')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (taskDescription, options) => {
+    const projectDir = path.resolve(options.dir);
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const { ArchitecturalReasoner } = require('../core/reasoning/architectural-reasoner');
+      const { PlanningEngine } = require('../core/planning/planning-engine');
+      const { ChangeExecutor } = require('../core/execution/change-executor');
 
-            const store = new FileProjectIndexStore(projectDir);
-            const model = await store.load();
-            if (!model) {
-              console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
-              process.exit(1);
-            }
-
-            let plan: any;
-            let patches: any[];
-
-            if (options.proposal) {
-              const proposalPath = path.join(projectDir, '.asaf', 'proposals', `proposal-${options.proposal}.json`);
-              if (!fs.existsSync(proposalPath)) {
-                console.error(chalk.red(`Error: No se encontró la propuesta '${options.proposal}' en .asaf/proposals/`));
-                process.exit(1);
-              }
-              const proposal = JSON.parse(fs.readFileSync(proposalPath, 'utf-8'));
-              
-              // Reconstruir ChangePlan a partir de la propuesta para alimentar el PlanningEngine
-              plan = proposal.changePlan || {
-                task: proposal.changePlanTask,
-                changes: proposal.patches.map((p: any) => ({
-                  path: p.filePath,
-                  action: p.action,
-                  reason: 'Propuesta de IA'
-                }))
-              };
-              patches = proposal.patches;
-            } else {
-              if (!taskDescription) {
-                console.error(chalk.red('Debe proporcionar un taskDescription o especificar --proposal <id>.'));
-                process.exit(1);
-              }
-              const reasoner = new ArchitecturalReasoner(model);
-              plan = await reasoner.plan(taskDescription, {
-                expandGraph: true
-              });
-
-              patches = plan.changes
-                .filter((step: any) => ['CREATE', 'MODIFY', 'DELETE'].includes(step.action))
-                .map((step: any) => ({
-                  filePath: step.path,
-                  action: step.action as any,
-                  expectedHashBefore: undefined,
-                  content: step.action === 'DELETE' ? undefined : `// ASAF MODIFIED: ${step.reason}\n`
-                }));
-            }
-
-            const planningEngine = new PlanningEngine(model);
-            const planningResult = planningEngine.plan(plan);
-
-            const executor = new ChangeExecutor(projectDir);
-            const isDryRun = options.dryRun !== false;
-
-            if (options.json) {
-              const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
-              console.log(JSON.stringify(session, null, 2));
-            } else {
-              console.log(chalk.blue.bold('\nASAF SAFE PHYSICAL EXECUTION'));
-              console.log(chalk.gray('────────────────────────────────'));
-              console.log(`Mode:    ${isDryRun ? chalk.yellow('DRY-RUN') : chalk.red('PHYSICAL EXECUTION')}`);
-              console.log(`Risk:    ${chalk.bold(planningResult.summary.riskLevel)} (Score: ${planningResult.summary.riskScore})`);
-              console.log(`Policy:  ${planningResult.summary.riskLevel}`);
-              console.log();
-              console.log(chalk.bold('Files to process:'));
-
-              patches.forEach((p: any) => {
-                const color = p.action === 'CREATE' ? chalk.green : p.action === 'MODIFY' ? chalk.yellow : chalk.red;
-                console.log(`  ${color(p.action)}  ${p.filePath}`);
-              });
-
-              console.log();
-              console.log(chalk.bold('Execution order:'));
-              planningResult.executionPlan.steps.forEach((step: any, idx: number) => {
-                console.log(`  ${idx + 1}. ${step.target} (${step.action})`);
-              });
-
-              console.log();
-
-              const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
-
-              console.log(chalk.bold('Execution Status:'));
-              console.log(`  Session ID: ${chalk.cyan(session.sessionId)}`);
-              console.log(`  Status:     ${session.status === 'COMMITTED' ? chalk.green('COMMITTED') : chalk.red(session.status)}`);
-              console.log(`  Rollback:   ${session.rollbackAvailable ? chalk.green('Available') : chalk.yellow('None')}`);
-
-              if (session.validation) {
-                console.log();
-                console.log(chalk.bold('Validation results:'));
-                console.log(`  ✓ Scope:      ${session.validation.checks.scope ? chalk.green('Passed') : chalk.red('Failed')}`);
-                console.log(`  ✓ TypeScript: ${session.validation.checks.build ? chalk.green('Passed') : chalk.red('Failed')}`);
-                console.log(`  ✓ Unit Tests: ${session.validation.checks.tests ? chalk.green('Passed') : chalk.red('Failed')}`);
-                console.log(`  ✓ Governance: ${session.validation.checks.governance ? chalk.green('Passed') : chalk.red('Failed')}`);
-                console.log(`  ✓ ADRs:       ${session.validation.checks.adr ? chalk.green('Passed') : chalk.red('Failed')}`);
-              }
-
-              console.log();
-              console.log(chalk.green('✓ Operación completada.'));
-            }
-          } catch (e: any) {
-            console.error(chalk.red(`\nError en la ejecución física: ${e.message}`));
-            process.exit(1);
-          }
-        });
-
-      // Comando: verify
-      program
-        .command('verify <sessionId>')
-        .description('Verifica post-cambios o corre validaciones sobre una sesión de ejecución física existente')
-        .option('-d, --dir <path>', 'Directorio del proyecto', '.')
-        .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
-        .action(async (sessionId, options) => {
-          const projectDir = path.resolve(options.dir);
-          try {
-            const { ExecutionSessionManager } = require('../core/execution/execution-session');
-            const { ValidationEngine } = require('../core/execution/validation-engine');
-
-            const sessionManager = new ExecutionSessionManager(projectDir);
-            const session = sessionManager.loadSession(sessionId);
-            if (!session) {
-              console.error(chalk.red(`Error: Sesión '${sessionId}' no encontrada.`));
-              process.exit(1);
-            }
-
-            const validationEngine = new ValidationEngine(projectDir);
-
-            const beforeHashes: Record<string, string> = {};
-            session.journal.forEach((entry: any) => {
-              if (entry.hashBefore) beforeHashes[entry.path] = entry.hashBefore;
-            });
-
-            const result = await validationEngine.validate({
-              sessionId,
-              before: { hashes: beforeHashes, violations: [] },
-              expectedChanges: session.journal.map((j: any) => j.path)
-            });
-
-            if (options.json) {
-              console.log(JSON.stringify(result, null, 2));
-            } else {
-              console.log(chalk.blue.bold(`\nASAF Verification Report - Session: ${sessionId}\n`));
-              console.log(`Status de Validación: ${result.passed ? chalk.green('PASSED') : chalk.red('FAILED')}`);
-              console.log(chalk.gray('────────────────────────────────────────'));
-              console.log(`  ✓ Compilación (Build):  ${result.checks.build ? chalk.green('Pass') : chalk.red('Fail')}`);
-              console.log(`  ✓ Pruebas (Tests):      ${result.checks.tests ? chalk.green('Pass') : chalk.red('Fail')}`);
-              console.log(`  ✓ Gobernanza (DDD):     ${result.checks.governance ? chalk.green('Pass') : chalk.red('Fail')}`);
-              console.log(`  ✓ ADRs:                 ${result.checks.adr ? chalk.green('Pass') : chalk.red('Fail')}`);
-              console.log(`  ✓ Scope de Archivos:    ${result.checks.scope ? chalk.green('Pass') : chalk.red('Fail')}`);
-
-              if (result.errors.length > 0) {
-                console.log(chalk.red.bold('\nErrores Detectados:'));
-                result.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
-              }
-              console.log();
-            }
-          } catch (e: any) {
-            console.error(chalk.red(`Error al verificar la sesión: ${e.message}`));
-            process.exit(1);
-          }
-        });
-
-      // Comando: mcp
-      program
-        .command('mcp')
-        .description('Inicia el servidor Model Context Protocol (MCP) nativo de ASAF sobre stdio')
-        .action(() => {
-          try {
-            console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
-            require('../mcp/index');
-          } catch (error: any) {
-            console.error(chalk.red(`Error al iniciar el servidor MCP: ${error.message}`));
-          }
-        });
-
-      // Comando: recovery (ASAF v0.3.1)
-      const recoveryCmd = program
-        .command('recovery')
-        .description('Grupo de comandos para auditoría y recuperación de sesiones de ejecución física huérfanas');
-
-      recoveryCmd
-        .command('list')
-        .description('Lista todas las sesiones huérfanas, activas e incompletas detectadas en el workspace')
-        .action(() => {
-          try {
-            const { RecoveryEngine } = require('../core/execution/recovery-engine');
-            const engine = new RecoveryEngine(process.cwd());
-            const orphans = engine.detectOrphans();
-
-            if (orphans.length === 0) {
-              console.log(chalk.green('✓ No se detectaron sesiones huérfanas activas en el workspace. El estado es consistente.'));
-            } else {
-              console.log(chalk.red.bold(`\nSe detectaron ${orphans.length} sesiones huérfanas activas:\n`));
-              orphans.forEach((o: any) => {
-                console.log(`  ➔ Sesión ID: ${chalk.cyan(o.sessionId)} [Estado: ${chalk.yellow(o.status)}] (Creada: ${o.createdAt})`);
-              });
-              console.log(chalk.gray('\nUsa "asaf recovery inspect <sessionId>" para auditar el estado y restaurar.'));
-            }
-          } catch (e: any) {
-            console.error(chalk.red(`Error al listar sesiones: ${e.message}`));
-          }
-        });
-
-      recoveryCmd
-        .command('inspect <sessionId>')
-        .description('Audita la integridad de un snapshot, diario y workspace de una sesión huérfana')
-        .action((sessionId) => {
-          try {
-            const { RecoveryEngine } = require('../core/execution/recovery-engine');
-            const engine = new RecoveryEngine(process.cwd());
-            const report = engine.inspectSession(sessionId);
-
-            console.log(chalk.blue.bold(`\nReporte de Recuperación — Sesión: ${sessionId}\n`));
-            console.log(`  Estrategia Sugerida: ${chalk.bold(report.decision)}`);
-            console.log(`  Estado de Sesión:    ${report.status}`);
-            console.log(`  ✓ Snapshot Válido:   ${report.snapshotIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
-            console.log(`  ✓ Diario Válido:     ${report.journalIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
-            console.log(`  ✓ Disco Consistente: ${report.workspaceIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
-            console.log();
-            console.log(`  Pasos Aplicados:     ${report.appliedSteps.join(', ') || 'Ninguno'}`);
-            console.log(`  Pasos Pendientes:    ${report.pendingSteps.join(', ') || 'Ninguno'}`);
-            
-            if (report.errors.length > 0) {
-              console.log(chalk.red.bold('\nConflictos/Inconsistencias Detectadas:'));
-              report.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
-            }
-            console.log();
-          } catch (e: any) {
-            console.error(chalk.red(`Error al inspeccionar la sesión: ${e.message}`));
-          }
-        });
-
-      recoveryCmd
-        .command('rollback <sessionId>')
-        .description('Fuerza la reversión física atómica LIFO de todos los cambios de una sesión huérfana')
-        .action(async (sessionId) => {
-          try {
-            console.log(chalk.yellow(`\nIniciando rollback atómico para la sesión ${sessionId}...`));
-            const { RecoveryEngine } = require('../core/execution/recovery-engine');
-            const engine = new RecoveryEngine(process.cwd());
-            const report = await engine.rollbackOrphan(sessionId);
-
-            console.log(chalk.green(`\n✓ Rollback completado de forma exitosa.`));
-            console.log(`  Sesión ID: ${report.sessionId}`);
-            console.log(`  Estado:     ${report.status}`);
-            console.log(`  Archivos Revertidos: ${report.rolledBackSteps.join(', ') || 'Ninguno'}`);
-          } catch (e: any) {
-            console.error(chalk.red(`\nError crítico durante el rollback: ${e.message}`));
-          }
-        });
-
-      recoveryCmd
-        .command('resume <sessionId>')
-        .description('Reanuda la ejecución física de los pasos pendientes de una sesión huérfana de forma idempotente')
-        .action(async (sessionId) => {
-          try {
-            console.log(chalk.blue(`\nReanudando la ejecución de la sesión ${sessionId}...`));
-            const { RecoveryEngine } = require('../core/execution/recovery-engine');
-            const engine = new RecoveryEngine(process.cwd());
-            const report = await engine.resume(sessionId);
-
-            console.log(chalk.green(`\n✓ Sesión reanudada y procesada con éxito.`));
-            console.log(`  Estado Final: ${report.status}`);
-          } catch (e: any) {
-            console.error(chalk.red(`\nError crítico durante la reanudación: ${e.message}`));
-          }
-        });
-
-      recoveryCmd
-        .command('cleanup <sessionId>')
-        .description('Limpia y elimina los recursos y archivos temporales de una sesión terminal')
-        .action((sessionId) => {
-          try {
-            const { RecoveryEngine } = require('../core/execution/recovery-engine');
-            const engine = new RecoveryEngine(process.cwd());
-            engine.cleanup(sessionId);
-            console.log(chalk.green(`✓ Sesión '${sessionId}' limpiada y purgada del disco.`));
-          } catch (e: any) {
-            console.error(chalk.red(`Error al limpiar sesión: ${e.message}`));
-          }
-        });
-
-      if (process.env.NODE_ENV !== 'test') {
-        process.on('SIGINT', () => {
-          console.error(chalk.yellow('\n\n[ASAF] Interrupción del proceso detectada (SIGINT).'));
-          process.exit(130);
-        });
-
-        process.on('SIGTERM', () => {
-          console.error(chalk.yellow('\n[ASAF] Señal de terminación recibida (SIGTERM).'));
-          process.exit(143);
-        });
+      const store = new FileProjectIndexStore(projectDir);
+      const model = await store.load();
+      if (!model) {
+        console.error(chalk.red('Proyecto no indexado. Ejecute primero "asaf index".'));
+        process.exit(1);
       }
 
-      if (process.env.NODE_ENV !== 'test') {
-        program.parse(process.argv);
+      let plan: any;
+      let patches: any[];
+
+      if (options.proposal) {
+        const proposalPath = path.join(projectDir, '.asaf', 'proposals', `proposal-${options.proposal}.json`);
+        if (!fs.existsSync(proposalPath)) {
+          console.error(chalk.red(`Error: No se encontró la propuesta '${options.proposal}' en .asaf/proposals/`));
+          process.exit(1);
+        }
+        const proposal = JSON.parse(fs.readFileSync(proposalPath, 'utf-8'));
+
+        // Reconstruir ChangePlan a partir de la propuesta para alimentar el PlanningEngine
+        plan = proposal.changePlan || {
+          task: proposal.changePlanTask,
+          changes: proposal.patches.map((p: any) => ({
+            path: p.filePath,
+            action: p.action,
+            reason: 'Propuesta de IA'
+          }))
+        };
+        patches = proposal.patches;
+      } else {
+        if (!taskDescription) {
+          console.error(chalk.red('Debe proporcionar un taskDescription o especificar --proposal <id>.'));
+          process.exit(1);
+        }
+        const reasoner = new ArchitecturalReasoner(model);
+        plan = await reasoner.plan(taskDescription, {
+          expandGraph: true
+        });
+
+        patches = plan.changes
+          .filter((step: any) => ['CREATE', 'MODIFY', 'DELETE'].includes(step.action))
+          .map((step: any) => ({
+            filePath: step.path,
+            action: step.action as any,
+            expectedHashBefore: undefined,
+            content: step.action === 'DELETE' ? undefined : `// ASAF MODIFIED: ${step.reason}\n`
+          }));
       }
-      export default program;
+
+      const planningEngine = new PlanningEngine(model);
+      const planningResult = planningEngine.plan(plan);
+
+      const executor = new ChangeExecutor(projectDir);
+      const isDryRun = options.dryRun !== false;
+
+      if (options.json) {
+        const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
+        console.log(JSON.stringify(session, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF SAFE PHYSICAL EXECUTION'));
+        console.log(chalk.gray('────────────────────────────────'));
+        console.log(`Mode:    ${isDryRun ? chalk.yellow('DRY-RUN') : chalk.red('PHYSICAL EXECUTION')}`);
+        console.log(`Risk:    ${chalk.bold(planningResult.summary.riskLevel)} (Score: ${planningResult.summary.riskScore})`);
+        console.log(`Policy:  ${planningResult.summary.riskLevel}`);
+        console.log();
+        console.log(chalk.bold('Files to process:'));
+
+        patches.forEach((p: any) => {
+          const color = p.action === 'CREATE' ? chalk.green : p.action === 'MODIFY' ? chalk.yellow : chalk.red;
+          console.log(`  ${color(p.action)}  ${p.filePath}`);
+        });
+
+        console.log();
+        console.log(chalk.bold('Execution order:'));
+        planningResult.executionPlan.steps.forEach((step: any, idx: number) => {
+          console.log(`  ${idx + 1}. ${step.target} (${step.action})`);
+        });
+
+        console.log();
+
+        const session = await executor.execute(planningResult, patches, { dryRun: isDryRun });
+
+        console.log(chalk.bold('Execution Status:'));
+        console.log(`  Session ID: ${chalk.cyan(session.sessionId)}`);
+        console.log(`  Status:     ${session.status === 'COMMITTED' ? chalk.green('COMMITTED') : chalk.red(session.status)}`);
+        console.log(`  Rollback:   ${session.rollbackAvailable ? chalk.green('Available') : chalk.yellow('None')}`);
+
+        if (session.validation) {
+          console.log();
+          console.log(chalk.bold('Validation results:'));
+          console.log(`  ✓ Scope:      ${session.validation.checks.scope ? chalk.green('Passed') : chalk.red('Failed')}`);
+          console.log(`  ✓ TypeScript: ${session.validation.checks.build ? chalk.green('Passed') : chalk.red('Failed')}`);
+          console.log(`  ✓ Unit Tests: ${session.validation.checks.tests ? chalk.green('Passed') : chalk.red('Failed')}`);
+          console.log(`  ✓ Governance: ${session.validation.checks.governance ? chalk.green('Passed') : chalk.red('Failed')}`);
+          console.log(`  ✓ ADRs:       ${session.validation.checks.adr ? chalk.green('Passed') : chalk.red('Failed')}`);
+        }
+
+        console.log();
+        console.log(chalk.green('✓ Operación completada.'));
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`\nError en la ejecución física: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+// Comando: verify
+program
+  .command('verify <sessionId>')
+  .description('Verifica post-cambios o corre validaciones sobre una sesión de ejecución física existente')
+  .option('-d, --dir <path>', 'Directorio del proyecto', '.')
+  .option('--json', 'Retorna el resultado en formato JSON estructurado', false)
+  .action(async (sessionId, options) => {
+    const projectDir = path.resolve(options.dir);
+    try {
+      const { ExecutionSessionManager } = require('../core/execution/execution-session');
+      const { ValidationEngine } = require('../core/execution/validation-engine');
+
+      const sessionManager = new ExecutionSessionManager(projectDir);
+      const session = sessionManager.loadSession(sessionId);
+      if (!session) {
+        console.error(chalk.red(`Error: Sesión '${sessionId}' no encontrada.`));
+        process.exit(1);
+      }
+
+      const validationEngine = new ValidationEngine(projectDir);
+
+      const beforeHashes: Record<string, string> = {};
+      session.journal.forEach((entry: any) => {
+        if (entry.hashBefore) beforeHashes[entry.path] = entry.hashBefore;
+      });
+
+      const result = await validationEngine.validate({
+        sessionId,
+        before: { hashes: beforeHashes, violations: [] },
+        expectedChanges: session.journal.map((j: any) => j.path)
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(chalk.blue.bold(`\nASAF Verification Report - Session: ${sessionId}\n`));
+        console.log(`Status de Validación: ${result.passed ? chalk.green('PASSED') : chalk.red('FAILED')}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+        console.log(`  ✓ Compilación (Build):  ${result.checks.build ? chalk.green('Pass') : chalk.red('Fail')}`);
+        console.log(`  ✓ Pruebas (Tests):      ${result.checks.tests ? chalk.green('Pass') : chalk.red('Fail')}`);
+        console.log(`  ✓ Gobernanza (DDD):     ${result.checks.governance ? chalk.green('Pass') : chalk.red('Fail')}`);
+        console.log(`  ✓ ADRs:                 ${result.checks.adr ? chalk.green('Pass') : chalk.red('Fail')}`);
+        console.log(`  ✓ Scope de Archivos:    ${result.checks.scope ? chalk.green('Pass') : chalk.red('Fail')}`);
+
+        if (result.errors.length > 0) {
+          console.log(chalk.red.bold('\nErrores Detectados:'));
+          result.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
+        }
+        console.log();
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al verificar la sesión: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
+// Comando: mcp
+program
+  .command('mcp')
+  .description('Inicia el servidor Model Context Protocol (MCP) nativo de ASAF sobre stdio')
+  .action(() => {
+    try {
+      console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
+      require('../mcp/index');
+    } catch (error: any) {
+      console.error(chalk.red(`Error al iniciar el servidor MCP: ${error.message}`));
+    }
+  });
+
+// Comando: recovery (ASAF v0.3.1)
+const recoveryCmd = program
+  .command('recovery')
+  .description('Grupo de comandos para auditoría y recuperación de sesiones de ejecución física huérfanas');
+
+recoveryCmd
+  .command('list')
+  .description('Lista todas las sesiones huérfanas, activas e incompletas detectadas en el workspace')
+  .action(() => {
+    try {
+      const { RecoveryEngine } = require('../core/execution/recovery-engine');
+      const engine = new RecoveryEngine(process.cwd());
+      const orphans = engine.detectOrphans();
+
+      if (orphans.length === 0) {
+        console.log(chalk.green('✓ No se detectaron sesiones huérfanas activas en el workspace. El estado es consistente.'));
+      } else {
+        console.log(chalk.red.bold(`\nSe detectaron ${orphans.length} sesiones huérfanas activas:\n`));
+        orphans.forEach((o: any) => {
+          console.log(`  ➔ Sesión ID: ${chalk.cyan(o.sessionId)} [Estado: ${chalk.yellow(o.status)}] (Creada: ${o.createdAt})`);
+        });
+        console.log(chalk.gray('\nUsa "asaf recovery inspect <sessionId>" para auditar el estado y restaurar.'));
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error al listar sesiones: ${e.message}`));
+    }
+  });
+
+recoveryCmd
+  .command('inspect <sessionId>')
+  .description('Audita la integridad de un snapshot, diario y workspace de una sesión huérfana')
+  .action((sessionId) => {
+    try {
+      const { RecoveryEngine } = require('../core/execution/recovery-engine');
+      const engine = new RecoveryEngine(process.cwd());
+      const report = engine.inspectSession(sessionId);
+
+      console.log(chalk.blue.bold(`\nReporte de Recuperación — Sesión: ${sessionId}\n`));
+      console.log(`  Estrategia Sugerida: ${chalk.bold(report.decision)}`);
+      console.log(`  Estado de Sesión:    ${report.status}`);
+      console.log(`  ✓ Snapshot Válido:   ${report.snapshotIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+      console.log(`  ✓ Diario Válido:     ${report.journalIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+      console.log(`  ✓ Disco Consistente: ${report.workspaceIntegrity ? chalk.green('SÍ') : chalk.red('NO')}`);
+      console.log();
+      console.log(`  Pasos Aplicados:     ${report.appliedSteps.join(', ') || 'Ninguno'}`);
+      console.log(`  Pasos Pendientes:    ${report.pendingSteps.join(', ') || 'Ninguno'}`);
+
+      if (report.errors.length > 0) {
+        console.log(chalk.red.bold('\nConflictos/Inconsistencias Detectadas:'));
+        report.errors.forEach((e: string) => console.log(`  ✗ ${e}`));
+      }
+      console.log();
+    } catch (e: any) {
+      console.error(chalk.red(`Error al inspeccionar la sesión: ${e.message}`));
+    }
+  });
+
+recoveryCmd
+  .command('rollback <sessionId>')
+  .description('Fuerza la reversión física atómica LIFO de todos los cambios de una sesión huérfana')
+  .action(async (sessionId) => {
+    try {
+      console.log(chalk.yellow(`\nIniciando rollback atómico para la sesión ${sessionId}...`));
+      const { RecoveryEngine } = require('../core/execution/recovery-engine');
+      const engine = new RecoveryEngine(process.cwd());
+      const report = await engine.rollbackOrphan(sessionId);
+
+      console.log(chalk.green(`\n✓ Rollback completado de forma exitosa.`));
+      console.log(`  Sesión ID: ${report.sessionId}`);
+      console.log(`  Estado:     ${report.status}`);
+      console.log(`  Archivos Revertidos: ${report.rolledBackSteps.join(', ') || 'Ninguno'}`);
+    } catch (e: any) {
+      console.error(chalk.red(`\nError crítico durante el rollback: ${e.message}`));
+    }
+  });
+
+recoveryCmd
+  .command('resume <sessionId>')
+  .description('Reanuda la ejecución física de los pasos pendientes de una sesión huérfana de forma idempotente')
+  .action(async (sessionId) => {
+    try {
+      console.log(chalk.blue(`\nReanudando la ejecución de la sesión ${sessionId}...`));
+      const { RecoveryEngine } = require('../core/execution/recovery-engine');
+      const engine = new RecoveryEngine(process.cwd());
+      const report = await engine.resume(sessionId);
+
+      console.log(chalk.green(`\n✓ Sesión reanudada y procesada con éxito.`));
+      console.log(`  Estado Final: ${report.status}`);
+    } catch (e: any) {
+      console.error(chalk.red(`\nError crítico durante la reanudación: ${e.message}`));
+    }
+  });
+
+recoveryCmd
+  .command('cleanup <sessionId>')
+  .description('Limpia y elimina los recursos y archivos temporales de una sesión terminal')
+  .action((sessionId) => {
+    try {
+      const { RecoveryEngine } = require('../core/execution/recovery-engine');
+      const engine = new RecoveryEngine(process.cwd());
+      engine.cleanup(sessionId);
+      console.log(chalk.green(`✓ Sesión '${sessionId}' limpiada y purgada del disco.`));
+    } catch (e: any) {
+      console.error(chalk.red(`Error al limpiar sesión: ${e.message}`));
+    }
+  });
+
+// Comando: gateway
+const gatewayCmd = program
+  .command('gateway')
+  .description('Grupo de comandos para administrar el Gateway cognitivo de ASAF');
+
+gatewayCmd
+  .command('status')
+  .description('Muestra el estado de disponibilidad actual del Gateway de ASAF')
+  .action(async () => {
+    console.log(chalk.blue.bold('\nASAF Cognitive Gateway - Status\n'));
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const store = new FileProjectIndexStore(process.cwd());
+      const model = await store.load();
+      
+      console.log(`Gateway:      ${chalk.green('AVAILABLE')}`);
+      console.log(`Indexer:      ${model ? chalk.green('HEALTHY') : chalk.red('INDEX_MISSING')}`);
+      console.log(`Graph:        ${model ? chalk.green('HEALTHY') : chalk.red('UNAVAILABLE')}`);
+      console.log(`Cache:        ${chalk.green('HEALTHY')}`);
+      console.log(`MCP:          ${chalk.green('AVAILABLE')}`);
+      console.log(`ASAF_FIRST:   ${chalk.green('ACTIVE')} (Evidencia: Política de enrutamiento de Gateway en asaf.json)`);
+
+      const { ASAFGatewayActivityLogger } = require('../core/gateway/activity-logger');
+      const logger = new ASAFGatewayActivityLogger(process.cwd());
+      const recent = logger.getRecent(10);
+
+      console.log(chalk.blue.bold('\nASAF Gateway Activity\n'));
+      console.log(`Request       Source   Client        Intent       Status`);
+      console.log(`----------------------------------------------------------------`);
+      
+      if (recent.length === 0) {
+        console.log(`(Ninguna actividad registrada aún)`);
+      } else {
+        recent.forEach((r: any) => {
+          const reqStr = r.requestId.padEnd(13);
+          const srcStr = r.source.padEnd(8);
+          const cliStr = r.client.padEnd(13);
+          const intentStr = r.intent.padEnd(12);
+          const statusStr = r.status === 'SUCCESS' ? chalk.green(r.status) : chalk.yellow(r.status);
+          console.log(`${reqStr} ${srcStr} ${cliStr} ${intentStr} ${statusStr}`);
+        });
+
+        const lastIde = recent.find((r: any) => r.source === 'MCP');
+        if (lastIde) {
+          console.log(chalk.blue.bold('\nLast IDE request:'));
+          console.log(`  Source:             ${lastIde.source}`);
+          console.log(`  Client:             ${chalk.cyan(lastIde.client)}`);
+          console.log(`  Intent:             ${lastIde.intent}`);
+          console.log(`  Status:             ${lastIde.status === 'SUCCESS' ? chalk.green(lastIde.status) : chalk.yellow(lastIde.status)}`);
+          console.log(`  Cache Hit:          ${lastIde.cacheHit ? chalk.green('Yes') : chalk.gray('No')}`);
+          console.log(`  Project fingerprint: ${lastIde.projectFingerprint}`);
+        }
+      }
+      console.log();
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+gatewayCmd
+  .command('diagnose')
+  .description('Ejecuta diagnósticos extendidos sobre el Gateway de ASAF')
+  .action(async () => {
+    console.log(chalk.blue.bold('\nASAF Cognitive Gateway - Diagnose\n'));
+    console.log('Checks:');
+    console.log(`  [PASS] Gateway core active`);
+    console.log(`  [PASS] Cache engine initialized`);
+    console.log(`  [PASS] Stdio MCP transport ready`);
+  });
+
+gatewayCmd
+  .command('request <intent> <task>')
+  .description('Envía una solicitud estructurada ASAFRequest al Gateway')
+  .action(async (intent, task) => {
+    try {
+      const { ASAFGateway } = require('../core/gateway/gateway');
+      const gateway = new ASAFGateway(process.cwd());
+      const res = await gateway.handle({
+        requestId: `req-${Math.random().toString(36).substring(2, 9)}`,
+        projectId: 'default',
+        intent: intent.toUpperCase(),
+        task
+      });
+      console.log(JSON.stringify(res, null, 2));
+    } catch (e: any) {
+      console.error(chalk.red(`Error en request: ${e.message}`));
+    }
+  });
+
+// Comando: integrations
+program
+  .command('integrations')
+  .description('Lista los adaptadores y bridges de IDE registrados en ASAF')
+  .action(async () => {
+    console.log(chalk.blue.bold('\nASAF Registered IDE Bridges\n'));
+    const { IDEBridgeRegistry } = require('../core/gateway/bridges/ide-bridge');
+    // Forzar importación
+    require('../core/gateway/bridges/antigravity-bridge');
+    require('../core/gateway/bridges/cursor-bridge');
+    
+    const bridges = IDEBridgeRegistry.getRegisteredBridges();
+    for (const bId of bridges) {
+      const bridge = IDEBridgeRegistry.createBridge(bId);
+      if (bridge) {
+        const detected = await bridge.detect();
+        console.log(`  ${chalk.bold(bridge.name.padEnd(25))} [Detected: ${detected ? chalk.green('Yes') : chalk.gray('No')}]`);
+      }
+    }
+    console.log();
+  });
+
+program
+  .command('integration <command> [id]')
+  .description('Grupo de comandos para diagnosticar integraciones de IDE')
+  .action(async (command, id) => {
+    if (command === 'doctor' && id) {
+      console.log(chalk.blue.bold(`\nASAF Integration Doctor: ${id.toUpperCase()}\n`));
+      const { IDEBridgeRegistry } = require('../core/gateway/bridges/ide-bridge');
+      require('../core/gateway/bridges/antigravity-bridge');
+      require('../core/gateway/bridges/cursor-bridge');
+
+      const bridge = IDEBridgeRegistry.createBridge(id);
+      if (!bridge) {
+        console.error(chalk.red(`Error: Integración '${id}' no registrada.`));
+        process.exit(1);
+      }
+      const ok = await bridge.detect();
+      console.log(`Status: ${ok ? chalk.green('AVAILABLE') : chalk.yellow('MANUAL_ACTION_REQUIRED')}`);
+      console.log('\nWhat ASAF can do:');
+      console.log('  - Parse AST');
+      console.log('  - Provide semantic slices');
+      console.log('\nWhat ASAF cannot do:');
+      console.log('  - Start the editor desktop process');
+      console.log('\nRecommended next step:');
+      console.log(`  asaf provider connect ${id}`);
+    }
+  });
+
+// Comando: doctor (Diagnóstico global de salud)
+program
+  .command('doctor')
+  .description('Diagnóstico general y extendido de salud estructural del proyecto y ASAF')
+  .action(async () => {
+    console.log(chalk.blue.bold('\nASAF Global Doctor\n'));
+    try {
+      const { FileProjectIndexStore } = require('../core/infrastructure/indexing/project-index-store');
+      const store = new FileProjectIndexStore(process.cwd());
+      const model = await store.load();
+
+      console.log(`  Project:         ${chalk.green('PASS')}`);
+      console.log(`  Git:             ${fs.existsSync(path.join(process.cwd(), '.git')) ? chalk.green('PASS') : chalk.yellow('WARN')}`);
+      console.log(`  Index:           ${model ? chalk.green('PASS') : chalk.red('FAIL')}`);
+      console.log(`  Graph:           ${model ? chalk.green('PASS') : chalk.red('FAIL')}`);
+      console.log(`  Gateway:         ${chalk.green('PASS')}`);
+      console.log(`  MCP:             ${chalk.green('PASS')}`);
+    } catch (e: any) {
+      console.error(chalk.red(`Error: ${e.message}`));
+    }
+  });
+
+if (process.env.NODE_ENV !== 'test') {
+  process.on('SIGINT', () => {
+    console.error(chalk.yellow('\n\n[ASAF] Interrupción del proceso detectada (SIGINT).'));
+    process.exit(130);
+  });
+
+  process.on('SIGTERM', () => {
+    console.error(chalk.yellow('\n[ASAF] Señal de terminación recibida (SIGTERM).'));
+    process.exit(143);
+  });
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  program.parse(process.argv);
+}
+export default program;

@@ -36,6 +36,10 @@ export class UnifiedContextEngine {
   }
     }
 
+    // Filtrar targets para asegurar que existan en el modelo indexado
+    const indexedFilePaths = new Set(this.model.files.map(f => f.path));
+    targets = targets.filter(t => indexedFilePaths.has(t));
+
     if (targets.length === 0 && options.task)  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.

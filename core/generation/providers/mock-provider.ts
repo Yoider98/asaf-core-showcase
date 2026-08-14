@@ -1,5 +1,5 @@
 import { LLMProvider, LLMProviderFactory } from '../llm-provider';
-import { LLMResponse, LLMConfig, LLMGenerationError } from '../types';
+import { LLMResponse, LLMConfig, LLMGenerationError, ProviderDescriptor } from '../types';
 
 export class MockLLMProvider implements LLMProvider {
   private config: LLMConfig;
@@ -12,6 +12,17 @@ export class MockLLMProvider implements LLMProvider {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+  public async discover(projectDir: string): Promise<ProviderDescriptor>  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  },
+      configured: true,
+      available: true,
+      status: 'AVAILABLE'
+    };
   }
 
   public async ping(): Promise<boolean>  {

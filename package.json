@@ -1,11 +1,14 @@
 {
   "name": "asaf-framework",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "AI Software Architect Framework (ASAF) - Un estándar para desarrollo asistido por IA",
   "main": "dist/core/index.js",
   "bin": {
     "asaf": "./dist/cli/index.js"
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli/index.js",
@@ -28,14 +31,14 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "chalk": "^4.1.2",
     "commander": "^11.1.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "typescript": "^5.3.3"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^20.11.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.12",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "ts-node": "^10.9.2"
   }
 }

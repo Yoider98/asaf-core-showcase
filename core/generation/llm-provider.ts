@@ -1,4 +1,4 @@
-import { LLMResponse, LLMConfig } from './types';
+import { LLMResponse, LLMConfig, ProviderDescriptor } from './types';
 
 export interface LLMProvider {
   /**
@@ -15,6 +15,11 @@ export interface LLMProvider {
    * Obtiene la configuración del proveedor de LLM.
    */
   getConfig(): LLMConfig;
+
+  /**
+   * Realiza el auto-descubrimiento del proveedor en el entorno local.
+   */
+  discover(projectDir: string): Promise<ProviderDescriptor>;
 }
 
 export class LLMProviderFactory  {
@@ -28,6 +33,18 @@ export class LLMProviderFactory  {
     providerClass: new (config: LLMConfig) => LLMProvider
   ): void {
     this.registeredProviders[name.toLowerCase()] = providerClass;
+  }
+
+  public static getRegisteredProviders(): string[]  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+  public static getProviderClass(name: string): (new (config: LLMConfig) => LLMProvider) | undefined  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 
   public static create(config: LLMConfig): LLMProvider  {

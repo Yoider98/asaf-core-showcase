@@ -28,6 +28,7 @@ Su propósito principal es actuar como la **capa de inteligencia, contexto, memo
 * **Agent Runtime & Multi-agent Orchestration:** Secuencia interactiva de agentes virtuales (Solution Architect, Backend, DBA, QA) con verificación post-ejecución para evitar regresiones de calidad en cada tarea (`asaf run`).
 * **Universal Agent Bridge (MCP Server):** Servidor native MCP (Model Context Protocol) sobre stdio para inyectar contexto y gobernanza directamente en asistentes de IA líderes como Cursor, Cline o Claude Code.
 * **Closed-Loop In-Memory Autocorrection (v0.4.0):** Genera propuestas estructuradas de parches con LLMs desacoplados, implementa una doble barrera de seguridad logic/physical (Normalización Windows/POSIX, escape de traversal Unicode, symlinks), simula en memoria los imports reales de TypeScript resolviéndolos contra el tsconfig y el lote actual de cambios (No-Touch Disk), y autocorrige secuencialmente con inyección de feedback estructurado (hasta 3 reintentos) de forma 100% lógica.
+* **ASAF Universal Cognitive Gateway (v0.4.x):** Capa cognitiva universal por encima de cualquier editor de código que procesa solicitudes estructuradas (`ASAFRequest` e `ASAFResponse`), determinando políticas inteligentes de delegación (`ASAF_FIRST`), invalidación segura de caché e instrumentación append-only detallando telemetría de `tokenEconomy`.
 
 ---
 
@@ -42,6 +43,7 @@ ASAF/
 ├── context/         # Motor de slicing sintáctico y vinculación de ADRs en prompts.
 ├── core/            # Núcleo de gobernanza, linter dinámico, specs, status, indexación incremental y grafo.
 │   └── context/     # Context Intelligence Engine: CodeSlicer, ContextRanker, ContextBudget, UnifiedContextEngine.
+│   └── gateway/     # Universal Cognitive Gateway: ASAFGateway, activity logger, bridges y políticas.
 ├── discovery/       # Analizador AST con adaptadores modulares y grafos semánticos.
 ├── docs/            # Documentación de interfaces de comunicación y especificaciones de APIs.
 ├── generators/      # Generadores de infraestructura (Docker, Terraform, CI/CD).
@@ -70,9 +72,6 @@ Ejecuta la indexación determinista completa del AST del proyecto. Soporta la ba
 ```bash
 # Indexación completa
 npx asaf index
-
-# Indexación incremental rápida
-npx asaf index --incremental
 ```
 
 ### 4. `asaf graph`
@@ -80,15 +79,6 @@ Grupo de comandos para consultar y analizar la topología relacional del proyect
 ```bash
 # Consultar dependencias directas/transitivas de un símbolo o archivo
 npx asaf graph dependencies <nodeId> --depth <number|all>
-
-# Consultar dependientes directos/transitivos de un símbolo o archivo
-npx asaf graph dependents <nodeId> --depth <number|all>
-
-# Buscar el camino de dependencias (shortest path) entre dos componentes
-npx asaf graph path <from> <to>
-
-# Visualizar métricas generales, Fan-in/out y dependencias circulares (Tarjan SCC)
-npx asaf graph metrics
 ```
 
 ### 5. `asaf task "<desc>"`
@@ -102,12 +92,6 @@ Construye el contexto óptimo para modelos de IA usando el **Context Intelligenc
 ```bash
 # Contexto por tarea semántica
 npx asaf context "Implementar autenticación JWT"
-
-# Contexto de archivos específicos con explicación del ranking
-npx asaf context --file src/auth/auth.service.ts --explain
-
-# Limitar el contexto a un presupuesto estricto de tokens
-npx asaf context --file src/auth/auth.controller.ts --budget 8000 --json
 ```
 
 ### 7. `asaf run "<desc>"`
@@ -139,15 +123,6 @@ Grupo de comandos para la gobernanza e inteligencia de Decisiones de Arquitectur
 ```bash
 # Listar todas las decisiones de arquitectura indexadas
 npx asaf adr list [--json]
-
-# Mostrar detalles estructurados y contexto de un ADR específico
-npx asaf adr show <adrId> [--json]
-
-# Auditar la consistencia bidireccional y detectar ciclos o relaciones rotas en los ADRs
-npx asaf adr check [--json]
-
-# Consultar qué partes del código están gobernadas directa o transitivamente por un ADR
-npx asaf adr impact <adrId> [--json]
 ```
 
 ### 12. `asaf config llm`
@@ -164,17 +139,8 @@ npx asaf generate "Implementar autenticación JWT en controladores de usuarios" 
 
 ### 14. `asaf execute "<task>"`
 Genera un plan de cambio arquitectónico y lo ejecuta de forma segura en el disco. Por defecto corre en modo `DRY-RUN` (simulado). Pasa la bandera `--no-dry-run` para aplicar físicamente.
-
-Admite el flag `--proposal <id>` para ejecutar directamente una propuesta de IA validada de forma transaccional, detectando automáticamente conflictos si el hash del disco no coincide con el guardado en la generación:
 ```bash
-# Simular ejecución de tarea (DRY-RUN)
-npx asaf execute "Refactorizar core/execution/types.ts"
-
-# Ejecutar físicamente en disco con validaciones y rollback automático
 npx asaf execute "Refactorizar core/execution/types.ts" --no-dry-run
-
-# Ejecutar físicamente una propuesta estructurada validada de la IA
-npx asaf execute --proposal prop-123 --no-dry-run
 ```
 
 ### 15. `asaf verify <sessionId>`
@@ -183,12 +149,44 @@ Corre la suite completa de verificación post-cambio (compilación TypeScript, p
 npx asaf verify exec_1786464936737_s2no7
 ```
 
+### 16. `asaf gateway`
+Grupo de comandos para administrar e interactuar con el Gateway cognitivo universal de ASAF:
+```bash
+# Consultar estado, ASAF_FIRST e historial de transacciones MCP/CLI
+npx asaf gateway status
+
+# Diagnosticar la salud de transportes y motores del Gateway
+npx asaf gateway diagnose
+
+# Enviar una petición estructurada en caliente al Gateway
+npx asaf gateway request <intent> <task>
+```
+
+### 17. `asaf integrations`
+Lista los adaptadores y bridges de IDE registrados (como Antigravity y Cursor) y su estado real de autodetección en caliente en el entorno local:
+```bash
+npx asaf integrations
+```
+
+### 18. `asaf doctor`
+Ejecuta un diagnóstico general y extendido de salud estructural del proyecto, consistencia de Git y estado de disponibilidad del Gateway cognitivo:
+```bash
+npx asaf doctor
+```
+
 ---
 
 ## 🔌 Herramientas MCP Disponibles
 
 | Herramienta | Descripción |
 |---|---|
+| `asaf_discover` | Verifica el estado de disponibilidad general y diagnóstico del Gateway cognitivo. |
+| `asaf_understand` | Compila contexto semántico minimizado y dependencias transitivas optimizadas para una tarea. |
+| `asaf_analyze` | Realiza un análisis estático de dependencias y convenciones de gobernanza del proyecto. |
+| `asaf_impact` | Mapea las métricas de acoplamiento, afectación de nodos y riesgos de cambios potenciales. |
+| `asaf_plan` | Genera y ordena de forma determinista el plan de cambios para la tarea provista. |
+| `asaf_generate` | Genera una propuesta de parches en memoria (No-Touch Disk) mediante el VerificationLoop. |
+| `asaf_validate` | Valida de forma 100% side-effect free una propuesta estructurada ante reglas lógicas. |
 | `asaf_build_context` | Construye el `AIContext` optimizado para una tarea o conjunto de archivos con budget de tokens. |
 | `asaf_get_semantic_context` | Retorna dependencias, símbolos y tests relacionados de un nodo del grafo. |
 | `asaf_analyze_task` | Analiza el impacto de una tarea en lenguaje natural sobre el grafo del proyecto. |
@@ -196,21 +194,35 @@ npx asaf verify exec_1786464936737_s2no7
 | `asaf_get_graph_metrics` | Expone métricas de acoplamiento, Fan-in/out y SCC del grafo. |
 | `asaf_check_adrs` | Valida la consistencia de los ADRs indexados detectando relaciones rotas y ciclos. |
 | `asaf_get_adr_impact` | Traza qué archivos están gobernados por un ADR a través del grafo determinista. |
-| `asaf_generate_proposal` | Orquesta en memoria (No-Touch Disk) la generación y validación de una propuesta estructurada mediante IA. |
 | `asaf_execute_change` | Ejecuta un plan de cambio en modo dry-run o físico en disco. Retorna los detalles de la sesión. |
 | `asaf_validate_change` | Corre las validaciones de compilación, tests y gobernanza post-cambio en una sesión. |
 | `asaf_rollback_change` | Revierte atómicamente a nivel físico el disco al estado inicial pre-cambio usando copias de seguridad. |
 
 ---
 
-## 📖 Guía de Adopción e Integración de Agentes (Cursor / Cline / Claude Code)
+## 🔌 Bridges de IDE y Delegación MCP
 
-1. **Inicializar y Configurar:**
-   Corre `npx asaf init` y configura tu arquitectura en `asaf.json`.
-2. **Levantar el Servidor MCP:**
-   Registra el comando `node <path-to-asaf>/dist/cli/index.js mcp` en tu configuración de MCP de Cursor o Cline.
-3. **Consumir Herramientas:**
-   Los asistentes llamarán de forma automática a `asaf_build_context`, `asaf_check_governance` y `asaf_analyze_task` para auto-limitarse al contexto mínimo de tokens y asegurar la calidad estructural del proyecto.
+ASAF opera como un proveedor de Project Intelligence agnóstico. El agente conversacional de tu IDE interroga a ASAF mediante el Model Context Protocol (MCP) utilizando los adaptadores y bridges nativos.
+
+### Arquitectura de Delegación
+```text
+                     ┌──────────────────┐
+                     │    IDE Agent     │
+                     └────────┬─────────┘
+                              │
+                         MCP / Bridges
+                              ▼
+                     ┌──────────────────┐
+                     │   ASAF Gateway   │
+                     └────────┬─────────┘
+                              ▼
+                ┌────────────────────────────┐
+                │ ASAF PROJECT INTELLIGENCE  │
+                │                            │
+                │ Index / Graph / Governance │
+                │ Reasoning / Sim / Cache    │
+                └────────────────────────────┘
+```
 
 ---
 
@@ -218,11 +230,6 @@ npx asaf verify exec_1786464936737_s2no7
 
 | Versión | Descripción |
 |---|---|
-| `v0.2.1` | Core Graph Engine + Shortest Path + SCC |
-| `v0.2.2` | Indexación incremental + Git tracking |
-| `v0.2.3` | Impact Engine determinista |
-| `v0.2.4` | Architecture Governance Engine |
-| `v0.2.5` | Specs Engine |
 | `v0.2.6` | **ADR Intelligence Engine** — ADRs como entidades semánticas del grafo |
 | `v0.2.7` | **Context Intelligence Engine** — CodeSlicer AST, ranking BFS explicable, planificador de budget serializado |
 | `v0.2.8` | **Architectural Reasoning** — Inferencia de intenciones técnicas y objetivos conceptuales |
@@ -230,6 +237,7 @@ npx asaf verify exec_1786464936737_s2no7
 | `v0.3.0` | **Safe Physical Execution** — Escritura física en disco transaccional, Locks, validaciones y rollback atómico verificado por SHA-256 (Release Candidate) |
 | `v0.3.1` | **Seguridad Operacional** — Detección estricta de TOCTOU, Journaling idempotente LIFO, Locks exclusivos por sesión y auto-recuperación de sesiones huérfanas |
 | `v0.4.0` | **Agente Autocorrector en Memoria** — Generación estructurada de parches con LLM, doble barrera lógica/física (LogicalSanitizer + PhysicalSafetyValidator), simulación in-memory de imports reales de TS (sin tocar disco), bucle cerrado de autocorrección lógica de 3 intentos e integración desacoplada en CLI/MCP |
+| `v0.4.x` | **Universal Cognitive Gateway (Gate 11)** — Capa de control invertida cognitivamente mediante MCP y bridges universales (Antigravity/Cursor), políticas ASAF_FIRST, caché semántica con fingerprinting del proyecto y telemetría de tokenEconomy |
 
 ---
 

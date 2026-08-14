@@ -1,5 +1,5 @@
 import { LLMProvider, LLMProviderFactory } from '../llm-provider';
-import { LLMResponse, LLMConfig, LLMGenerationError } from '../types';
+import { LLMResponse, LLMConfig, LLMGenerationError, ProviderDescriptor } from '../types';
 
 export class OllamaProvider implements LLMProvider {
   private config: LLMConfig;
@@ -12,6 +12,46 @@ export class OllamaProvider implements LLMProvider {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+  public async discover(projectDir: string): Promise<ProviderDescriptor>  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }/api/tags`, { signal: controller.signal });
+        if (id) clearTimeout(id);
+        hostResponded = res.ok;
+      } catch (e)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+      if (hostResponded)  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }' not found in Ollama. Resolution: Download the model in your terminal by running: "ollama run ${this.config.model}".`;
+      } else {
+        status = 'UNAVAILABLE';
+        statusMessage = `Ollama server is unreachable at ${this.host}. Resolution: 1. Ensure Ollama is installed (https://ollama.com). 2. Verify that the Ollama service or desktop application is running.`;
+      }
+    }
+
+    return {
+      id: 'ollama',
+      name: 'Ollama Local Model',
+      type: 'LOCAL_MODEL',
+      model: this.config.model,
+      capabilities: {
+        contextAware: false,
+        toolCalling: false
+      },
+      configured: true,
+      available: isOk,
+      status,
+      statusMessage: statusMessage || undefined
+    };
   }
 
   /**
