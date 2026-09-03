@@ -39,6 +39,10 @@ Debes seguir estrictamente las directrices del framework en cada cambio.
      npm run dev -- audit
      \`\`\`
 4. **Consumo de Specs**: Para implementar o crear nuevas características, primero consulta el índice maestro de especificaciones en \`docs/specs/README.md\` para evitar tener que leer todo el código fuente directamente.
+5. **Poda y Limpieza de Código Muerto**: Para detectar y eliminar código huérfano o archivos temporales de forma segura, ejecuta:
+   \`\`\`bash
+   npm run dev -- clean --dry-run
+   \`\`\`
 
 ## 📋 Reglas Generales
 1. **Verificación de ADRs**: Antes de proponer o implementar cualquier cambio arquitectónico, debes leer los ADRs (Architecture Decision Records) actuales ubicados en \`docs/adr/\` y el índice principal en \`docs/adr/README.md\`.
@@ -75,12 +79,14 @@ Estás operando como un agente autónomo de desarrollo en un proyecto gestionado
      npm run dev -- audit
      \`\`\`
 4. **Consumo de Specs**: Para implementar o crear nuevas características, primero consulta el índice maestro de especificaciones en \`docs/specs/README.md\` para evitar tener que leer todo el código fuente directamente.
+5. **Poda y Limpieza de Código Muerto**: Para auditar archivos huérfanos y artefactos residuales, ejecuta \`npm run dev -- clean\`.
 
 ## 🧭 Directrices de Comportamiento
 1. **Consultar ADRs primero**: Antes de cualquier tarea de código, consulta \`docs/adr/\` para conocer las tecnologías aprobadas, justificaciones, pros/contras y decisiones de diseño del proyecto.
 2. **Usa ASAF CLI**:
    - Para entender el grafo de dependencias de importación: ejecuta \`npm run dev -- analyze\` y revisa \`asaf-graph.json\`.
    - Para obtener la lista de impacto de los cambios actuales: ejecuta \`npm run dev -- context\`.
+   - Para auditar código muerto o basura residual: ejecuta \`npm run dev -- clean --dry-run\`.
 3. **Optimización de Tokens**: Prefiere el slicing de código. No leas clases o archivos de más de 300 líneas de manera redundante si ya sabes qué firmas exponen.
 4. **Cumplimiento de Estilo**: Sigue las directrices del rol y checklist especificado en \`asaf.json\` o el pool de agentes de ASAF (\`npm run dev -- agents\`).
 `;

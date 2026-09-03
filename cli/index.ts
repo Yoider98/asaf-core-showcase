@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+if (process.argv.includes('mcp')) {
+  console.log = (...args: any[]) => {
+    console.error(...args);
+  };
+}
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
@@ -2719,10 +2724,81 @@ program
   .description('Inicia el servidor Model Context Protocol (MCP) nativo de ASAF sobre stdio')
   .action(() => {
     try {
-      console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
+      // console.error(chalk.blue('Iniciando el servidor MCP de ASAF...'));
       require('../mcp/index');
     } catch (error: any) {
       console.error(chalk.red(`Error al iniciar el servidor MCP: ${error.message}`));
+    }
+  });
+
+// Comando: clean
+program
+  .command('clean')
+  .description('Audita, traslada a cuarentena, borra físicamente o restaura código muerto y archivos huérfanos del proyecto')
+  .option('-d, --dry-run', 'Ejecuta solo la auditoría estática y genera docs/cleanup-report.md sin alterar el disco (por defecto)', false)
+  .option('-q, --quarantine', 'Mueve los archivos huérfanos a la cuarentena en .asaf/quarantine/<sessionId>/', false)
+  .option('-a, --apply', 'Elimina físicamente del disco los archivos huérfanos o en cuarentena confirmados', false)
+  .option('-r, --restore <sessionId>', 'Restaura una sesión de cuarentena a las ubicaciones originales del proyecto')
+  .option('--json', 'Retorna el informe en formato JSON estructurado', false)
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    try {
+      const { CleanEngine } = require('../core/clean/clean-engine');
+      const engine = new CleanEngine(projectDir);
+
+      if (options.restore) {
+        console.log(chalk.blue(`Restaurando sesión de cuarentena: ${options.restore}...`));
+        const res = engine.restore(options.restore);
+        if (options.json) {
+          console.log(JSON.stringify(res, null, 2));
+        } else {
+          console.log(chalk.green.bold(`✓ Se restauraron ${res.restoredFiles.length} archivos desde la cuarentena.`));
+        }
+        return;
+      }
+
+      if (options.quarantine) {
+        console.log(chalk.yellow('Moviendo código muerto y archivos huérfanos a la cuarentena de ASAF...'));
+        const res = engine.quarantine();
+        if (options.json) {
+          console.log(JSON.stringify(res, null, 2));
+        } else {
+          console.log(chalk.green.bold(`✓ ${res.quarantinedFiles.length} archivos puestos en cuarentena.`));
+          console.log(`ID de Sesión de Cuarentena: ${chalk.bold(res.sessionId)}`);
+          console.log(`Para restaurar ejecuta: ${chalk.cyan(`asaf clean --restore ${res.sessionId}`)}`);
+        }
+        return;
+      }
+
+      if (options.apply) {
+        console.log(chalk.red.bold('Ejecutando eliminación física de archivos huérfanos...'));
+        const res = engine.apply();
+        if (options.json) {
+          console.log(JSON.stringify(res, null, 2));
+        } else {
+          console.log(chalk.green.bold(`✓ ${res.deletedFiles.length} archivos eliminados físicamente del disco.`));
+        }
+        return;
+      }
+
+      // Por defecto o --dry-run
+      console.log(chalk.blue('Ejecutando auditoría de código muerto y archivos residuales (Dry-Run)...'));
+      const report = engine.runAudit();
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(chalk.blue.bold('\nASAF Project Cleanup Audit - Reporte de Poda\n'));
+        console.log(`Archivos Huérfanos:      ${report.orphanFiles.length > 0 ? chalk.red(report.orphanFiles.length) : chalk.green('0')}`);
+        console.log(`Exportaciones Sin Uso:   ${chalk.yellow(report.unusedExports.length)}`);
+        console.log(`Dependencias npm Sin Uso:${chalk.yellow(report.unusedDependencies.length)}`);
+        console.log(`Archivos Residuales:     ${chalk.yellow(report.bloatFiles.length)}`);
+        console.log(`Ahorro Estimado:         ${chalk.magenta(`${(report.totalPotentialSavingsBytes / 1024).toFixed(2)} KB`)}`);
+        console.log(chalk.gray('────────────────────────────────────────'));
+        console.log(`Informe Markdown generado en: ${chalk.bold('docs/cleanup-report.md')}\n`);
+      }
+    } catch (e: any) {
+      console.error(chalk.red(`Error en la operación de limpieza: ${e.message}`));
+      process.exit(1);
     }
   });
 

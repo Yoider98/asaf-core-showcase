@@ -183,8 +183,8 @@ export class LLMProviderRouter implements LLMProvider {
 
     // Caso B: Selección automática basada en prioridades ("auto", "interactive", "strict")
     const mode = this.config.mode || 'auto';
-    const preferredList = this.config.strategy?.preferred || ['ide_agent', 'ollama'];
-    const fallbackList = this.config.strategy?.fallback || ['ollama'];
+    const preferredList = this.config.strategy?.preferred || ['ide_agent', 'openai'];
+    const fallbackList = this.config.strategy?.fallback || ['openai'];
     const allCandidates = Array.from(new Set([...preferredList, ...fallbackList]));
 
     const errors: string[] = [];
