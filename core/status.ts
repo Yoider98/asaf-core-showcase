@@ -7,6 +7,8 @@ import { AuditEngine } from './audit';
 export interface ProjectHealthStatus {
   architectureScore: number;
   securityScore: number;
+  privacyScore: number;
+  malwareSurfaceScore: number;
   databaseScore: number;
   seoScore: number;
   technicalDebtHours: number;
@@ -15,6 +17,8 @@ export interface ProjectHealthStatus {
     high: number;
     medium: number;
     low: number;
+    privacy: number;
+    malwareSurface: number;
   };
 }
 
@@ -33,11 +37,17 @@ export class ProjectStatusEngine {
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   });
 
-    // 3. Puntuaciones parciales de salud
-    const securityScore = Math.max(0, 100 - (critical * 30 + high * 15));
+    // Puntuaciones específicas de seguridad y privacidad
+    const securityBreaches = breaches.filter(b => b.type === 'seguridad' || b.type === 'calidad_sast');
+    const privacyBreaches = breaches.filter(b => b.type === 'privacidad');
+    const malwareBreaches = breaches.filter(b => b.type === 'malware_superficie');
     const databaseBreaches = breaches.filter(b => b.type === 'base_de_datos');
-    const databaseScore = Math.max(0, 100 - (databaseBreaches.length * 15));
     const seoBreaches = breaches.filter(b => b.type === 'seo_web');
+
+    const securityScore = Math.max(0, 100 - (securityBreaches.filter(b => b.severity === 'crítica').length * 30 + securityBreaches.filter(b => b.severity === 'alta').length * 15 + securityBreaches.filter(b => b.severity === 'media').length * 5));
+    const privacyScore = Math.max(0, 100 - (privacyBreaches.filter(b => b.severity === 'crítica' || b.severity === 'alta').length * 25 + privacyBreaches.filter(b => b.severity === 'media').length * 10));
+    const malwareSurfaceScore = Math.max(0, 100 - (malwareBreaches.filter(b => b.severity === 'crítica').length * 35 + malwareBreaches.filter(b => b.severity === 'alta').length * 20));
+    const databaseScore = Math.max(0, 100 - (databaseBreaches.length * 15));
     const seoScore = Math.max(0, 100 - (seoBreaches.length * 10));
 
     // 4. Estimar Deuda Técnica en Horas
@@ -51,10 +61,19 @@ export class ProjectStatusEngine {
     return {
       architectureScore,
       securityScore,
+      privacyScore,
+      malwareSurfaceScore,
       databaseScore,
       seoScore,
       technicalDebtHours,
-      findings: { critical, high, medium, low }
+      findings: {
+        critical,
+        high,
+        medium,
+        low,
+        privacy: privacyBreaches.length,
+        malwareSurface: malwareBreaches.length
+      }
     };
   }
 

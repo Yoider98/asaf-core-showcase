@@ -3096,6 +3096,51 @@ program
     }
   });
 
+// Comando: handover
+program
+  .command('handover')
+  .description('Genera automáticamente el Paquete Completo de Entrega Final del Proyecto en docs/handover/')
+  .option('-c, --client <clientName>', 'Nombre del cliente o entidad receptora', 'Cliente Estimado')
+  .option('-p, --project <projectName>', 'Nombre del proyecto', '')
+  .option('-v, --version <version>', 'Versión del release a entregar', '1.0.0')
+  .option('-a, --author <author>', 'Nombre de la empresa o equipo desarrollador', 'Equipo ASAF')
+  .action(async (options) => {
+    const projectDir = process.cwd();
+    console.log(chalk.blue.bold('\nASAF Handover Package Generator 📦🚀\n'));
+
+    try {
+      let graph: any = null;
+      const graphPath = path.join(projectDir, 'asaf-graph.json');
+      if (fs.existsSync(graphPath)) {
+        try {
+          graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+        } catch (e) {}
+      } else {
+        const { DiscoveryEngine } = require('../discovery/index');
+        const discoveryEngine = new DiscoveryEngine(projectDir);
+        graph = discoveryEngine.analyze();
+      }
+
+      const { HandoverEngine } = require('../core/handover');
+      const engine = new HandoverEngine(projectDir, graph);
+      const generatedFiles = engine.generateHandoverPackage({
+        clientName: options.client,
+        projectName: options.project || path.basename(projectDir),
+        version: options.version,
+        author: options.author
+      });
+
+      console.log(chalk.green.bold('✓ Paquete de Entrega Final generado exitosamente:'));
+      generatedFiles.forEach((f: string) => {
+        console.log(`  - ${chalk.yellow(path.relative(projectDir, f))}`);
+      });
+      console.log(`\nConsulte el índice maestro en: ${chalk.bold('docs/handover/README.md')}\n`);
+    } catch (e: any) {
+      console.error(chalk.red(`Error al generar el paquete de entrega final: ${e.message}`));
+      process.exit(1);
+    }
+  });
+
 if (process.env.NODE_ENV !== 'test') {
   process.on('SIGINT', () => {
     console.error(chalk.yellow('\n\n[ASAF] Interrupción del proceso detectada (SIGINT).'));

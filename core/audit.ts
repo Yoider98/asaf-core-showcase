@@ -4,7 +4,7 @@ import { execSync } from 'child_process';
 import chalk from 'chalk';
 
 export interface AuditBreach {
-  type: 'seguridad' | 'base_de_datos' | 'seo_web' | 'escalabilidad' | 'calidad_sast';
+  type: 'seguridad' | 'privacidad' | 'malware_superficie' | 'base_de_datos' | 'seo_web' | 'escalabilidad' | 'calidad_sast';
   severity: 'crítica' | 'alta' | 'media' | 'baja';
   file: string;
   evidence: string;
@@ -27,12 +27,33 @@ export class AuditEngine {
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 
+      // Auditoría específica para Dart / Flutter
+      if (ext === '.dart')  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
+
+      // Auditoría de bases de datos y acoplamiento
+      if (['.ts', '.js', '.tsx', '.jsx', '.dart', '.py'].includes(ext)) {
+        this.auditDatabase(file, content);
+        this.auditEscalabilidad(file, content);
+      }
+
+      // Auditoría de páginas e interfaces web
       if (['.html', '.tsx', '.jsx'].includes(ext) || file.endsWith('index.html')) {
         this.auditSEO(file, content);
       }
+
+      // Auditoría de Manifiestos y Configuración de seguridad (Android / iOS / Web)
+      if (filename === 'androidmanifest.xml' || filename === 'info.plist' || filename === 'web.config')  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  }
     });
 
-    // 2. Orquestar herramientas SAST externas
+    // 2. Orquestar herramientas SAST externas si están disponibles
     this.runESLintSAST();
     this.runBanditSAST();
 
@@ -114,6 +135,9 @@ export class AuditEngine {
   }
   }
 
+  /**
+   * Pilar 1: Auditoría de Seguridad de Código (SAST, Inyecciones, Secretos)
+   */
   private auditSecurity(file: string, content: string): void  {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
@@ -121,26 +145,128 @@ export class AuditEngine {
   });
     }
 
-    const secretsRegex = /(password|passwd|secret|api_key|token|private_key)\s*=\s*['"`][a-zA-Z0-9_\-]{8,}['"`]/gi;
+    const secretsRegex = /(password|passwd|secret|api_key|apikey|private_key|auth_token)\s*=\s*['"`][a-zA-Z0-9_\-]{8,}['"`]/gi;
     if (secretsRegex.test(content)) {
       this.breaches.push({
         type: 'seguridad',
         severity: 'alta',
         file,
         evidence: 'Secretos hardcoded detectados',
-        description: 'Uso directo de contraseñas, claves API o tokens en texto plano.',
-        recommendation: 'Migrar las credenciales a variables de entorno (.env) o un gestor de secretos.'
+        description: 'Uso directo de contraseñas, claves API o tokens privados en texto plano en el código fuente.',
+        recommendation: 'Migrar las credenciales a variables de entorno (.env) o un gestor de secretos seguro.'
       });
     }
 
-    if (content.match(/\.query\s*\(\s*['"`].*\$\{.*\}['"`]\s*\)/g)) {
+    if (content.match(/\.query\s*\(\s*['"`].*\$\{.*\}['"`]\s*\)/g) || content.match(/SELECT\s+.*\s+FROM\s+.*\+\s*\w+/gi)) {
       this.breaches.push({
         type: 'seguridad',
         severity: 'crítica',
         file,
-        evidence: 'Query concatenada detectada',
-        description: 'Concatenación directa de parámetros en consultas de base de datos SQL.',
+        evidence: 'Consulta SQL concatenada detectada',
+        description: 'Concatenación directa de parámetros en consultas de base de datos SQL (Riesgo de SQL Injection).',
         recommendation: 'Utilizar sentencias preparadas o consultas parametrizadas (ej. `db.query(sql, [params])`).'
+      });
+    }
+
+    if (content.includes('http://') && !file.includes('test')) {
+      this.breaches.push({
+        type: 'seguridad',
+        severity: 'media',
+        file,
+        evidence: 'Endpoint HTTP no cifrado (http://)',
+        description: 'Uso de protocolo HTTP en plano para comunicación de red, vulnerable a ataques Man-in-the-Middle.',
+        recommendation: 'Actualizar todas las URLs a HTTPS con certificados TLS válidos.'
+      });
+    }
+  }
+
+  /**
+   * Pilar 2: Auditoría de Privacidad de Datos (PII & Data Privacy)
+   */
+  private auditPrivacy(file: string, content: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+    }
+
+    // Almacenamiento local no cifrado para datos sensibles
+    if ((content.includes('localStorage.setItem') || content.includes('SharedPreferences')) &&
+        (content.toLowerCase().includes('token') || content.toLowerCase().includes('password') || content.toLowerCase().includes('jwt'))) {
+      this.breaches.push({
+        type: 'privacidad',
+        severity: 'alta',
+        file,
+        evidence: 'Almacenamiento sensible en local storage sin cifrar',
+        description: 'Uso de almacenamiento no cifrado (localStorage / SharedPreferences plano) para credenciales o tokens de sesión.',
+        recommendation: 'Utilizar almacenamiento seguro cifrado (ej. `FlutterSecureStorage`, `EncryptedSharedPreferences`, o Cookies HTTP-Only).'
+      });
+    }
+  }
+
+  /**
+   * Pilar 3: Superficie de Ataque & Prevención de Malware
+   */
+  private auditMalwareSurface(file: string, content: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+    }
+
+    // Desactivación de validación SSL/TLS
+    if (content.includes('badCertificateCallback') || content.includes('ALLOW_ALL_HOSTNAME_VERIFIER') || content.includes('rejectUnauthorized: false')) {
+      this.breaches.push({
+        type: 'malware_superficie',
+        severity: 'crítica',
+        file,
+        evidence: 'Verificación de Certificados SSL desactivada',
+        description: 'Se desactivó explícitamente la validación de certificados SSL/TLS, permitiendo interceptación maliciosa de tráfico.',
+        recommendation: 'Remover deshabilitaciones de SSL en producción y verificar la cadena de certificados.'
+      });
+    }
+  }
+
+  /**
+   * Reglas específicas para Flutter / Dart
+   */
+  private auditDartSecurity(file: string, content: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+    }
+
+    if (content.includes('HttpClient') && content.includes('badCertificateCallback')) {
+      this.breaches.push({
+        type: 'seguridad',
+        severity: 'crítica',
+        file,
+        evidence: 'badCertificateCallback activado en HttpClient',
+        description: 'El cliente HTTP de Flutter acepta certificados inválidos o autofirmados indiscriminadamente.',
+        recommendation: 'Limitar la aceptación de certificados únicamente en entornos de desarrollo con variables de entorno.'
+      });
+    }
+  }
+
+  /**
+   * Auditoría de Manifiestos (Android / iOS / Web)
+   */
+  private auditManifestSecurity(file: string, content: string): void  {
+    // La implementación de análisis semántico avanzado de este módulo
+    // es privada. Se expone la arquitectura y firmas de ASAF.
+    throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
+  });
+    }
+
+    if (content.includes('android:allowBackup="true"')) {
+      this.breaches.push({
+        type: 'privacidad',
+        severity: 'media',
+        file,
+        evidence: 'allowBackup="true"',
+        description: 'Se permite el respaldo por ADB de los datos locales de la aplicación.',
+        recommendation: 'Evaluar establecer `allowBackup="false"` si la aplicación maneja información altamente confidencial.'
       });
     }
   }
@@ -213,20 +339,21 @@ export class AuditEngine {
   });
     }
 
-    let markdown = `# Informe de Auditoría y Brechas de Proyecto ASAF 📑📐\n\n`;
-    markdown += `Este informe detalla las vulnerabilidades, deficiencias arquitectónicas, SEO e ineficiencias de rendimiento de base de datos detectadas en la adopción del framework.\n\n`;
+    let markdown = `# Informe de Auditoría de Seguridad, Privacidad y Arquitectura ASAF 📑🛡️\n\n`;
+    markdown += `Este informe detalla las vulnerabilidades de código, fuga de privacidad (PII), superficie de ataque, SEO e ineficiencias de base de datos detectadas en el proyecto.\n\n`;
 
     const totalBreaches = this.breaches.length;
     markdown += `### Resumen Ejecutivo\n`;
     markdown += `- **Brechas Totales Detectadas:** ${totalBreaches}\n`;
-    markdown += `- **Nivel de Seguridad:** ${this.getBreachSummaryCount('seguridad')} críticas/altas encontradas.\n`;
-    markdown += `- **Nivel de Rendimiento DB:** ${this.getBreachSummaryCount('base_de_datos')} optimizaciones sugeridas.\n`;
-    markdown += `- **Calidad SEO:** ${this.getBreachSummaryCount('seo_web')} fallos identificados.\n`;
-    markdown += `- **Calidad SAST (Estático):** $ {
+    markdown += `- **Seguridad de Código:** ${this.getBreachSummaryCount('seguridad')} vulnerabilidades SAST.\n`;
+    markdown += `- **Privacidad de Datos (PII):** $ {
     // La implementación de análisis semántico avanzado de este módulo
     // es privada. Se expone la arquitectura y firmas de ASAF.
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
-  } advertencias del linter.\n\n`;
+  } hallazgos de privacidad.\n`;
+    markdown += `- **Superficie de Ataque & Malware:** ${this.getBreachSummaryCount('malware_superficie')} riesgos de superficie.\n`;
+    markdown += `- **Rendimiento DB:** ${this.getBreachSummaryCount('base_de_datos')} optimizaciones sugeridas.\n`;
+    markdown += `- **Calidad SEO:** ${this.getBreachSummaryCount('seo_web')} fallos identificados.\n\n`;
 
     markdown += `| Gravedad | Componente | Tipo | Evidencia | Recomendación |\n`;
     markdown += `| --- | --- | --- | --- | --- |\n`;
@@ -247,3 +374,4 @@ export class AuditEngine {
     throw new Error("ASAF Showcase: Módulo avanzado no implementado.");
   }
 }
+
